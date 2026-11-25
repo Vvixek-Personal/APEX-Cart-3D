@@ -146,7 +146,7 @@ export function buildTrackEnvironment(
     frames,
     -(TRACK_HALF + 0.4),
     TRACK_HALF + 0.4,
-    0.02,
+    0.03,
     16.0,
   );
   geometries.push(apronGeo);
@@ -161,7 +161,7 @@ export function buildTrackEnvironment(
   group.add(apronMesh);
 
   // 3. Main continuous wide asphalt track surface
-  const asphaltGeo = buildClosedRibbonGeometry(frames, -TRACK_HALF, TRACK_HALF, 0.04, 16.0);
+  const asphaltGeo = buildClosedRibbonGeometry(frames, -TRACK_HALF, TRACK_HALF, 0.07, 16.0);
   geometries.push(asphaltGeo);
   const asphaltMat = new THREE.MeshStandardMaterial({
     color: 0xffffff,
@@ -184,14 +184,14 @@ export function buildTrackEnvironment(
     frames,
     leftEdgeOffset - lineWidth * 0.5,
     leftEdgeOffset + lineWidth * 0.5,
-    0.058,
+    0.11,
     16.0,
   );
   const rightLineGeo = buildClosedRibbonGeometry(
     frames,
     rightEdgeOffset - lineWidth * 0.5,
     rightEdgeOffset + lineWidth * 0.5,
-    0.058,
+    0.11,
     16.0,
   );
   geometries.push(leftLineGeo, rightLineGeo);
@@ -238,7 +238,7 @@ export function buildTrackEnvironment(
   startGridMesh.position
     .copy(banners.start.position)
     .addScaledVector(banners.start.tangent, -(startGridLength * 0.5 - 0.8));
-  startGridMesh.position.y = 0.062;
+  startGridMesh.position.y = 0.125;
   startGridMesh.rotation.y = Math.atan2(banners.start.tangent.x, banners.start.tangent.z);
   startGridMesh.receiveShadow = true;
   group.add(startGridMesh);
@@ -261,7 +261,7 @@ export function buildTrackEnvironment(
 
   const finishStripMesh = new THREE.Mesh(finishStripGeo, finishStripMat);
   finishStripMesh.position.copy(banners.finish.position);
-  finishStripMesh.position.y = 0.064;
+  finishStripMesh.position.y = 0.13;
   finishStripMesh.rotation.y = Math.atan2(banners.finish.tangent.x, banners.finish.tangent.z);
   finishStripMesh.receiveShadow = true;
   group.add(finishStripMesh);

@@ -5,11 +5,16 @@ import {
   BANNER_TOTAL_HEIGHT,
   FIELD_HALF,
   FIELD_THICKNESS,
+  STADIUM_CANOPY_INNER,
+  STADIUM_CONCOURSE_OUTER,
+  STADIUM_TOWER_HEIGHT,
+  STADIUM_TOWER_RADIUS,
   TRACK_HALF,
   TRACK_WIDTH,
   analyzeTrackGeometry,
   computeSpectatorCameraPose,
   createTrackCurve,
+  evaluateStadiumPoint,
   getBannerPlacements,
   sampleTrackFrames,
 } from './trackLayout';
@@ -88,12 +93,33 @@ test('spectator camera frames entire square field and both banners with margin',
       new THREE.Vector3(finish.position.x, BANNER_TOTAL_HEIGHT, finish.position.z),
     ];
 
+    for (let i = 0; i < 16; i++) {
+      const outer = evaluateStadiumPoint((i / 16) * Math.PI * 2, STADIUM_CONCOURSE_OUTER);
+      mustBeVisible.push(new THREE.Vector3(outer.x, 15.5, outer.z));
+    }
+    for (const cornerAngle of [Math.PI * 0.25, Math.PI * 0.75, Math.PI * 1.25, Math.PI * 1.75]) {
+      const tower = evaluateStadiumPoint(cornerAngle, STADIUM_TOWER_RADIUS);
+      mustBeVisible.push(new THREE.Vector3(tower.x, STADIUM_TOWER_HEIGHT, tower.z));
+    }
+
     for (const pt of mustBeVisible) {
       const ndc = pt.clone().project(cam);
       assert.ok(
         Math.abs(ndc.x) <= 0.9 && Math.abs(ndc.y) <= 0.9,
-        `Aspect ${aspect.toFixed(2)}: point (${pt.x}, ${pt.y}, ${pt.z}) projected near edge (${ndc.x.toFixed(3)}, ${ndc.y.toFixed(3)})`,
+        `Aspect ${aspect.toFixed(2)}: point (${pt.x.toFixed(1)}, ${pt.y.toFixed(1)}, ${pt.z.toFixed(1)}) projected near edge (${ndc.x.toFixed(3)}, ${ndc.y.toFixed(3)})`,
       );
     }
+  }
+});
+
+test('stadium structure stays strictly outside the 240x240 grass field', () => {
+  for (let i = 0; i < 96; i++) {
+    const theta = (i / 96) * Math.PI * 2;
+    const innerCanopy = evaluateStadiumPoint(theta, STADIUM_CANOPY_INNER);
+    const maxCoord = Math.max(Math.abs(innerCanopy.x), Math.abs(innerCanopy.z));
+    assert.ok(
+      maxCoord > FIELD_HALF + 10,
+      `Stadium inner canopy at theta=${theta.toFixed(2)} encroaches grass field: maxCoord=${maxCoord.toFixed(2)}`,
+    );
   }
 });

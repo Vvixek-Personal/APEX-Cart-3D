@@ -11,6 +11,8 @@ export interface ProceduralTextureSet {
   startGrid: THREE.CanvasTexture;
   contactShadow: THREE.CanvasTexture;
   skyBackdrop: THREE.CanvasTexture;
+  concourseColor: THREE.CanvasTexture;
+  floodlightBank: THREE.CanvasTexture;
   dispose: () => void;
 }
 
@@ -344,6 +346,97 @@ function createSkyBackdropTexture(): THREE.CanvasTexture {
   return tex;
 }
 
+function createConcourseTexture(maxAnisotropy: number): THREE.CanvasTexture {
+  const size = 256;
+  const canvas = document.createElement('canvas');
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext('2d')!;
+
+  ctx.fillStyle = '#c5ccd4';
+  ctx.fillRect(0, 0, size, size);
+
+  const rand = seededRand(505);
+  for (let i = 0; i < 1200; i++) {
+    const x = rand() * size;
+    const y = rand() * size;
+    const v = 186 + Math.floor(rand() * 24);
+    ctx.fillStyle = `rgba(${v}, ${v + 4}, ${v + 8}, 0.38)`;
+    ctx.fillRect(x, y, 2, 2);
+  }
+
+  // Subtle architectural expansion joint lines
+  ctx.strokeStyle = 'rgba(92, 106, 124, 0.34)';
+  ctx.lineWidth = 2;
+  for (const pos of [0, 64, 128, 192]) {
+    ctx.beginPath();
+    ctx.moveTo(pos, 0);
+    ctx.lineTo(pos, size);
+    ctx.stroke();
+
+    ctx.beginPath();
+    ctx.moveTo(0, pos);
+    ctx.lineTo(size, pos);
+    ctx.stroke();
+  }
+
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.wrapS = THREE.RepeatWrapping;
+  tex.wrapT = THREE.RepeatWrapping;
+  tex.anisotropy = maxAnisotropy;
+  return tex;
+}
+
+function createFloodlightBankTexture(maxAnisotropy: number): THREE.CanvasTexture {
+  const w = 512;
+  const h = 256;
+  const canvas = document.createElement('canvas');
+  canvas.width = w;
+  canvas.height = h;
+  const ctx = canvas.getContext('2d')!;
+
+  ctx.fillStyle = '#202630';
+  ctx.fillRect(0, 0, w, h);
+
+  const cols = 6;
+  const rows = 2;
+  const padX = 24;
+  const padY = 22;
+  const gapX = 14;
+  const gapY = 16;
+  const cellW = (w - padX * 2 - gapX * (cols - 1)) / cols;
+  const cellH = (h - padY * 2 - gapY * (rows - 1)) / rows;
+
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) {
+      const x = padX + c * (cellW + gapX);
+      const y = padY + r * (cellH + gapY);
+      ctx.fillStyle = '#cfd7e3';
+      ctx.fillRect(x - 3, y - 3, cellW + 6, cellH + 6);
+
+      const grad = ctx.createRadialGradient(
+        x + cellW * 0.5,
+        y + cellH * 0.5,
+        2,
+        x + cellW * 0.5,
+        y + cellH * 0.5,
+        cellW * 0.65,
+      );
+      grad.addColorStop(0, '#ffffff');
+      grad.addColorStop(0.6, '#fff8db');
+      grad.addColorStop(1, '#f3dfa2');
+      ctx.fillStyle = grad;
+      ctx.fillRect(x, y, cellW, cellH);
+    }
+  }
+
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.anisotropy = maxAnisotropy;
+  return tex;
+}
+
 export function createProceduralTextures(maxAnisotropy: number): ProceduralTextureSet {
   const grassColor = createGrassAlbedoTexture(maxAnisotropy);
   const grassRoughness = createGrassRoughnessTexture(maxAnisotropy);
@@ -355,6 +448,8 @@ export function createProceduralTextures(maxAnisotropy: number): ProceduralTextu
   const startGrid = createStartGridTexture(maxAnisotropy);
   const contactShadow = createContactShadowTexture();
   const skyBackdrop = createSkyBackdropTexture();
+  const concourseColor = createConcourseTexture(maxAnisotropy);
+  const floodlightBank = createFloodlightBankTexture(maxAnisotropy);
 
   return {
     grassColor,
@@ -367,6 +462,8 @@ export function createProceduralTextures(maxAnisotropy: number): ProceduralTextu
     startGrid,
     contactShadow,
     skyBackdrop,
+    concourseColor,
+    floodlightBank,
     dispose: () => {
       grassColor.dispose();
       grassRoughness.dispose();
@@ -378,6 +475,8 @@ export function createProceduralTextures(maxAnisotropy: number): ProceduralTextu
       startGrid.dispose();
       contactShadow.dispose();
       skyBackdrop.dispose();
+      concourseColor.dispose();
+      floodlightBank.dispose();
     },
   };
 }

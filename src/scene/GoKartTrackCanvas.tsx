@@ -17,6 +17,7 @@ import {
 } from '../track/trackLayout';
 import type { CameraMode } from '../components/TouchControls';
 import { buildTrackBanners } from './buildBanners';
+import { buildStadiumArchitecture } from './buildStadium';
 import { buildTrackEnvironment } from './buildTrackMesh';
 import { createProceduralTextures } from './textures';
 
@@ -90,7 +91,7 @@ export function GoKartTrackCanvas({
     container.appendChild(renderer.domElement);
 
     const scene = new THREE.Scene();
-    scene.fog = new THREE.Fog(0xe6f4fc, 780, 1500);
+    scene.fog = new THREE.Fog(0xe6f4fc, 1950, 3600);
 
     // Studio reflection environment for subtle metallic highlights
     const pmremGenerator = new THREE.PMREMGenerator(renderer);
@@ -105,38 +106,41 @@ export function GoKartTrackCanvas({
     const textures = createProceduralTextures(maxAnisotropy);
     scene.background = textures.skyBackdrop;
 
-    // Bright, soft daylight lighting rig scaled to cover the 240x240 field
+    // Bright, soft daylight lighting rig scaled to cover the 240x240 field and surrounding stadium
     const hemiLight = new THREE.HemisphereLight(0xd9efff, 0x3b8f2e, 0.65);
-    hemiLight.position.set(0, 160, 0);
+    hemiLight.position.set(0, 180, 0);
     scene.add(hemiLight);
 
     const sunLight = new THREE.DirectionalLight(0xfff5e0, 1.45);
-    sunLight.position.set(-110, 190, 130);
+    sunLight.position.set(-140, 240, 165);
     sunLight.castShadow = true;
     const shadowSize = isSoftwareGl ? 1024 : 2048;
     sunLight.shadow.mapSize.set(shadowSize, shadowSize);
     sunLight.shadow.camera.near = 20;
-    sunLight.shadow.camera.far = 520;
-    sunLight.shadow.camera.left = -148;
-    sunLight.shadow.camera.right = 148;
-    sunLight.shadow.camera.top = 148;
-    sunLight.shadow.camera.bottom = -148;
-    sunLight.shadow.bias = -0.0004;
-    sunLight.shadow.normalBias = 0.025;
-    sunLight.shadow.radius = 3.5;
+    sunLight.shadow.camera.far = 700;
+    sunLight.shadow.camera.left = -215;
+    sunLight.shadow.camera.right = 215;
+    sunLight.shadow.camera.top = 215;
+    sunLight.shadow.camera.bottom = -215;
+    sunLight.shadow.bias = -0.0008;
+    sunLight.shadow.normalBias = 0.16;
+    sunLight.shadow.radius = 3.0;
     scene.add(sunLight);
 
     const fillLight = new THREE.DirectionalLight(0xdceeff, 0.25);
-    fillLight.position.set(130, 100, -120);
+    fillLight.position.set(160, 120, -150);
     scene.add(fillLight);
 
-    // Enlarged 2x track environment & banners
+    // Enlarged 2x track environment, banners, and empty open-air stadium outside grass field
     const curve = createTrackCurve();
     const frames = sampleTrackFrames(curve, 640);
     const bannerPlacements = getBannerPlacements(curve);
 
     const trackBuild = buildTrackEnvironment(frames, bannerPlacements, textures);
     scene.add(trackBuild.group);
+
+    const stadiumBuild = buildStadiumArchitecture(textures);
+    scene.add(stadiumBuild.group);
 
     const bannerBuild = buildTrackBanners(bannerPlacements, textures);
     scene.add(bannerBuild.group);
@@ -165,7 +169,7 @@ export function GoKartTrackCanvas({
     controls.dampingFactor = 0.07;
     controls.maxPolarAngle = Math.PI * 0.45;
     controls.minDistance = 60;
-    controls.maxDistance = 950;
+    controls.maxDistance = 2400;
     controls.update();
 
     let userMovedOrbit = false;
@@ -276,6 +280,8 @@ export function GoKartTrackCanvas({
       camera.aspect = currentAspect;
       if (cameraModeRef.current === 'spectator' && !userMovedOrbit) {
         camera.position.copy(spectatorPose.position);
+        camera.near = spectatorPose.near;
+        camera.far = spectatorPose.far;
         controls.target.copy(spectatorPose.target);
         controls.update();
       }
@@ -375,8 +381,16 @@ export function GoKartTrackCanvas({
         controls.target.lerp(_desiredCamTarget, lookAlpha);
 
         const targetFov = 46;
+        let projDirty = false;
+        if (Math.abs(camera.near - 0.5) > 0.05) {
+          camera.near = 0.5;
+          projDirty = true;
+        }
         if (Math.abs(camera.fov - targetFov) > 0.05) {
           camera.fov += (targetFov - camera.fov) * (1 - Math.exp(-9 * dt));
+          projDirty = true;
+        }
+        if (projDirty) {
           camera.updateProjectionMatrix();
         }
         camera.lookAt(controls.target);
@@ -387,6 +401,7 @@ export function GoKartTrackCanvas({
           camera.position.lerp(spectatorPose.position, alpha);
           controls.target.lerp(spectatorPose.target, alpha);
           camera.fov += (spectatorPose.fov - camera.fov) * alpha;
+          camera.near += (spectatorPose.near - camera.near) * alpha;
           camera.updateProjectionMatrix();
           camera.lookAt(controls.target);
 
@@ -397,6 +412,7 @@ export function GoKartTrackCanvas({
             camera.position.copy(spectatorPose.position);
             controls.target.copy(spectatorPose.target);
             camera.fov = spectatorPose.fov;
+            camera.near = spectatorPose.near;
             camera.updateProjectionMatrix();
             returningToSpectator = false;
             controls.enabled = true;
@@ -447,6 +463,7 @@ export function GoKartTrackCanvas({
       controls.removeEventListener('start', onControlsStart);
       controls.dispose();
       kartRig.dispose();
+      stadiumBuild.dispose();
       trackBuild.dispose();
       bannerBuild.dispose();
       textures.dispose();

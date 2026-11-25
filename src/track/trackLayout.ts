@@ -14,6 +14,27 @@ export const BANNER_POST_OFFSET = TRACK_HALF + 1.35;
 export const BANNER_CLEAR_HEIGHT = 6.2;
 export const BANNER_TOTAL_HEIGHT = 10.8;
 
+// Open-air stadium bounds strictly outside the 240x240 grass field (FIELD_HALF = 120)
+export const STADIUM_EXPONENT = 4;
+export const STADIUM_CANOPY_INNER = 160;
+export const STADIUM_FACADE_RADIUS = 176;
+export const STADIUM_CANOPY_OUTER = 183;
+export const STADIUM_CONCOURSE_OUTER = 186;
+export const STADIUM_TOWER_RADIUS = 179;
+export const STADIUM_TOWER_HEIGHT = 40;
+
+/**
+ * Evaluates a point on the curved stadium superellipse perimeter at angle theta.
+ */
+export function evaluateStadiumPoint(theta: number, radius: number): { x: number; z: number } {
+  const c = Math.cos(theta);
+  const s = Math.sin(theta);
+  const exp = 2 / STADIUM_EXPONENT;
+  const x = radius * Math.sign(c) * Math.pow(Math.abs(c), exp);
+  const z = radius * Math.sign(s) * Math.pow(Math.abs(s), exp);
+  return { x, z };
+}
+
 export interface TrackFrame {
   u: number;
   arcLength: number;
@@ -190,35 +211,45 @@ export interface SpectatorCameraPose {
 }
 
 /**
- * High, wide, slightly angled spectator camera centered on the square field
- * with balanced framing margin around all four corners and both banners.
+ * High, wide, slightly angled spectator camera centered on the stadium and square field
+ * with balanced framing margin around the stadium, floodlight towers, track, and banners.
  */
 export function computeSpectatorCameraPose(aspect: number): SpectatorCameraPose {
   const safeAspect = Math.max(aspect, 0.4);
   const fov = 34;
-  // Slightly angled from South-South-East so the square field reads almost isometric
+  // Slightly angled from South-South-East so the square field & stadium read almost isometric
   // while keeping both START and FINISH banners angled favorably toward the viewer.
   const dir = new THREE.Vector3(0.42, 1.18, 1.0).normalize();
 
-  // Compute minimum distance along `dir` so all 4 field corners + banner tops
-  // stay comfortably inside [-0.84, 0.84] NDC on both axes.
-  const target = new THREE.Vector3(0, 1.2, 0);
-  const testPoints = [
+  // Compute minimum distance along `dir` so all stadium perimeter points, tower tops,
+  // field corners, and banner tops stay cleanly inside [-0.88, 0.88] NDC on both axes.
+  const target = new THREE.Vector3(0, 2.0, 0);
+  const testPoints: THREE.Vector3[] = [
     new THREE.Vector3(-FIELD_HALF, 0, -FIELD_HALF),
     new THREE.Vector3(FIELD_HALF, 0, -FIELD_HALF),
     new THREE.Vector3(-FIELD_HALF, 0, FIELD_HALF),
     new THREE.Vector3(FIELD_HALF, 0, FIELD_HALF),
-    new THREE.Vector3(-FIELD_HALF, -FIELD_THICKNESS, FIELD_HALF),
-    new THREE.Vector3(FIELD_HALF, -FIELD_THICKNESS, FIELD_HALF),
     new THREE.Vector3(40 * TRACK_LAYOUT_SCALE, BANNER_TOTAL_HEIGHT, 10 * TRACK_LAYOUT_SCALE),
     new THREE.Vector3(40 * TRACK_LAYOUT_SCALE, BANNER_TOTAL_HEIGHT, 31 * TRACK_LAYOUT_SCALE),
   ];
 
-  const cam = new THREE.PerspectiveCamera(fov, safeAspect, 1, 2400);
-  let low = 120;
-  let high = 1600;
+  // Sample outer stadium concourse, roof canopy, and corner floodlight tower tops
+  for (let i = 0; i < 16; i++) {
+    const theta = (i / 16) * Math.PI * 2;
+    const outer = evaluateStadiumPoint(theta, STADIUM_CONCOURSE_OUTER);
+    testPoints.push(new THREE.Vector3(outer.x, -3.2, outer.z));
+    testPoints.push(new THREE.Vector3(outer.x, 15.5, outer.z));
+  }
+  for (const cornerAngle of [Math.PI * 0.25, Math.PI * 0.75, Math.PI * 1.25, Math.PI * 1.75]) {
+    const tower = evaluateStadiumPoint(cornerAngle, STADIUM_TOWER_RADIUS);
+    testPoints.push(new THREE.Vector3(tower.x, STADIUM_TOWER_HEIGHT, tower.z));
+  }
 
-  for (let iter = 0; iter < 32; iter++) {
+  const cam = new THREE.PerspectiveCamera(fov, safeAspect, 1, 3600);
+  let low = 200;
+  let high = 2600;
+
+  for (let iter = 0; iter < 34; iter++) {
     const mid = (low + high) * 0.5;
     cam.position.copy(target).addScaledVector(dir, mid);
     cam.lookAt(target);
@@ -243,8 +274,8 @@ export function computeSpectatorCameraPose(aspect: number): SpectatorCameraPose 
     position: target.clone().addScaledVector(dir, distance),
     target,
     fov,
-    near: 1,
-    far: 2400,
+    near: Math.max(12, distance * 0.03),
+    far: 3800,
   };
 }
 
