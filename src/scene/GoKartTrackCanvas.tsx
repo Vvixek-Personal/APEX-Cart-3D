@@ -9,8 +9,8 @@ import {
   createInitialKartState,
   stepKartPhysics,
 } from '../kart/kartPhysics';
+import { SpectatorCameraController } from '../camera/spectatorCamera';
 import {
-  computeSpectatorCameraPose,
   createTrackCurve,
   getBannerPlacements,
   sampleTrackFrames,
@@ -91,7 +91,8 @@ export function GoKartTrackCanvas({
     container.appendChild(renderer.domElement);
 
     const scene = new THREE.Scene();
-    scene.fog = new THREE.Fog(0xe6f4fc, 2400, 4600);
+    const horizonFog = new THREE.Fog(0xcce9fb, 760, 1750);
+    scene.fog = horizonFog;
 
     // Studio reflection environment for subtle metallic highlights
     const pmremGenerator = new THREE.PMREMGenerator(renderer);
@@ -136,6 +137,19 @@ export function GoKartTrackCanvas({
     const frames = sampleTrackFrames(curve, 640);
     const bannerPlacements = getBannerPlacements(curve);
 
+    // Subtle expansive distant terrain plane so the stadium park sits grounded in a soft horizon
+    const horizonGroundGeo = new THREE.PlaneGeometry(5200, 5200);
+    horizonGroundGeo.rotateX(-Math.PI / 2);
+    const horizonGroundMat = new THREE.MeshStandardMaterial({
+      color: 0x6ca463,
+      roughness: 0.96,
+      metalness: 0.0,
+    });
+    const horizonGroundMesh = new THREE.Mesh(horizonGroundGeo, horizonGroundMat);
+    horizonGroundMesh.position.y = -4.02;
+    horizonGroundMesh.receiveShadow = false;
+    scene.add(horizonGroundMesh);
+
     const trackBuild = buildTrackEnvironment(frames, bannerPlacements, textures);
     scene.add(trackBuild.group);
 
@@ -152,25 +166,30 @@ export function GoKartTrackCanvas({
     kartRig.group.rotation.y = kartState.yaw;
     scene.add(kartRig.group);
 
-    // High, wide spectator camera centered on the square field
-    let spectatorPose = computeSpectatorCameraPose(currentAspect);
-    const camera = new THREE.PerspectiveCamera(
-      spectatorPose.fov,
-      currentAspect,
-      spectatorPose.near,
-      spectatorPose.far,
-    );
-    camera.position.copy(spectatorPose.position);
-    camera.lookAt(spectatorPose.target);
+    // Cinematic elevated three-quarter city skyline spectator camera
+    const spectatorCtrl = new SpectatorCameraController();
+    const camera = new THREE.PerspectiveCamera(38, currentAspect, 14, 4800);
 
     const controls = new OrbitControls(camera, renderer.domElement);
-    controls.target.copy(spectatorPose.target);
     controls.enableDamping = !isSoftwareGl;
     controls.dampingFactor = 0.07;
-    controls.maxPolarAngle = Math.PI * 0.45;
-    controls.minDistance = 60;
+    controls.minPolarAngle = THREE.MathUtils.degToRad(26);
+    controls.maxPolarAngle = Math.PI * 0.44;
+    controls.minDistance = 80;
     controls.maxDistance = 3000;
-    controls.update();
+
+    const initialPose = spectatorCtrl.snapToPose(
+      camera,
+      currentAspect,
+      kartState.x,
+      kartState.z,
+      controls.target,
+    );
+    let specElevDeg = initialPose.elevationDeg;
+    let specAzimDeg = initialPose.azimuthDeg;
+    let specDist = initialPose.distance;
+    horizonFog.near = Math.max(540, initialPose.distance * 1.12);
+    horizonFog.far = Math.max(1250, initialPose.distance * 2.02);
 
     let userMovedOrbit = false;
     let returningToSpectator = false;
@@ -276,16 +295,26 @@ export function GoKartTrackCanvas({
       const h = container.clientHeight || window.innerHeight;
       currentAspect = w / Math.max(h, 1);
 
-      spectatorPose = computeSpectatorCameraPose(currentAspect);
       camera.aspect = currentAspect;
       if (cameraModeRef.current === 'spectator' && !userMovedOrbit) {
-        camera.position.copy(spectatorPose.position);
-        camera.near = spectatorPose.near;
-        camera.far = spectatorPose.far;
-        controls.target.copy(spectatorPose.target);
-        controls.update();
+        const resizedPose = spectatorCtrl.snapToPose(
+          camera,
+          currentAspect,
+          kartState.x,
+          kartState.z,
+          controls.target,
+        );
+        specElevDeg = resizedPose.elevationDeg;
+        specAzimDeg = resizedPose.azimuthDeg;
+        specDist = resizedPose.distance;
+        horizonFog.near = Math.max(540, resizedPose.distance * 1.12);
+        horizonFog.far = Math.max(1250, resizedPose.distance * 2.02);
+        container.setAttribute('data-spectator-elevation', specElevDeg.toFixed(1));
+        container.setAttribute('data-spectator-azimuth', specAzimDeg.toFixed(1));
+        container.setAttribute('data-spectator-distance', specDist.toFixed(1));
+      } else {
+        camera.updateProjectionMatrix();
       }
-      camera.updateProjectionMatrix();
       renderer.setPixelRatio(isSoftwareGl ? 1 : Math.min(window.devicePixelRatio, 2));
       renderer.setSize(w, h);
     };
@@ -394,34 +423,54 @@ export function GoKartTrackCanvas({
           camera.updateProjectionMatrix();
         }
         camera.lookAt(controls.target);
-      } else {
-        if (returningToSpectator) {
-          controls.enabled = false;
-          const alpha = 1 - Math.exp(-9.5 * dt);
-          camera.position.lerp(spectatorPose.position, alpha);
-          controls.target.lerp(spectatorPose.target, alpha);
-          camera.fov += (spectatorPose.fov - camera.fov) * alpha;
-          camera.near += (spectatorPose.near - camera.near) * alpha;
-          camera.updateProjectionMatrix();
-          camera.lookAt(controls.target);
 
-          if (
-            camera.position.distanceTo(spectatorPose.position) < 0.35 &&
-            Math.abs(camera.fov - spectatorPose.fov) < 0.1
-          ) {
-            camera.position.copy(spectatorPose.position);
-            controls.target.copy(spectatorPose.target);
-            camera.fov = spectatorPose.fov;
-            camera.near = spectatorPose.near;
-            camera.updateProjectionMatrix();
-            returningToSpectator = false;
-            controls.enabled = true;
-            controls.update();
-          }
-        } else {
-          controls.enabled = true;
-          controls.update();
+        const fogAlpha = 1 - Math.exp(-4.0 * dt);
+        horizonFog.near = THREE.MathUtils.lerp(horizonFog.near, 620, fogAlpha);
+        horizonFog.far = THREE.MathUtils.lerp(horizonFog.far, 2100, fogAlpha);
+      } else if (!userMovedOrbit) {
+        controls.enabled = true;
+        const specRes = spectatorCtrl.update(
+          camera,
+          currentAspect,
+          kartState.x,
+          kartState.z,
+          dt,
+          controls.target,
+          returningToSpectator,
+        );
+        specElevDeg = specRes.elevationDeg;
+        specAzimDeg = specRes.azimuthDeg;
+        specDist = specRes.distance;
+        if (returningToSpectator && specRes.converged) {
+          returningToSpectator = false;
         }
+        const fogAlpha = 1 - Math.exp(-3.6 * dt);
+        horizonFog.near = THREE.MathUtils.lerp(
+          horizonFog.near,
+          Math.max(540, specRes.distance * 1.12),
+          fogAlpha,
+        );
+        horizonFog.far = THREE.MathUtils.lerp(
+          horizonFog.far,
+          Math.max(1250, specRes.distance * 2.02),
+          fogAlpha,
+        );
+      } else {
+        controls.enabled = true;
+        controls.update();
+        const userDist = camera.position.distanceTo(controls.target);
+        specDist = userDist;
+        const fogAlpha = 1 - Math.exp(-4.0 * dt);
+        horizonFog.near = THREE.MathUtils.lerp(
+          horizonFog.near,
+          Math.max(520, userDist * 1.12),
+          fogAlpha,
+        );
+        horizonFog.far = THREE.MathUtils.lerp(
+          horizonFog.far,
+          Math.max(1250, userDist * 2.02),
+          fogAlpha,
+        );
       }
 
       // Expose testable attributes at <= 10Hz without triggering React state renders
@@ -432,6 +481,9 @@ export function GoKartTrackCanvas({
         container.setAttribute('data-kart-speed', kartState.speed.toFixed(2));
         container.setAttribute('data-kart-x', kartState.x.toFixed(2));
         container.setAttribute('data-kart-z', kartState.z.toFixed(2));
+        container.setAttribute('data-spectator-elevation', specElevDeg.toFixed(1));
+        container.setAttribute('data-spectator-azimuth', specAzimDeg.toFixed(1));
+        container.setAttribute('data-spectator-distance', specDist.toFixed(1));
       }
 
       renderer.render(scene, camera);
@@ -448,6 +500,9 @@ export function GoKartTrackCanvas({
     container.setAttribute('data-kart-speed', '0.00');
     container.setAttribute('data-kart-x', kartState.x.toFixed(2));
     container.setAttribute('data-kart-z', kartState.z.toFixed(2));
+    container.setAttribute('data-spectator-elevation', specElevDeg.toFixed(1));
+    container.setAttribute('data-spectator-azimuth', specAzimDeg.toFixed(1));
+    container.setAttribute('data-spectator-distance', specDist.toFixed(1));
 
     tick();
 
@@ -466,6 +521,8 @@ export function GoKartTrackCanvas({
       stadiumBuild.dispose();
       trackBuild.dispose();
       bannerBuild.dispose();
+      horizonGroundGeo.dispose();
+      horizonGroundMat.dispose();
       textures.dispose();
       envTarget.dispose();
       renderer.dispose();
