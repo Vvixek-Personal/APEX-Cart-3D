@@ -9,6 +9,11 @@ import {
   createInitialKartState,
   stepKartPhysics,
 } from '../kart/kartPhysics';
+import {
+  FreeCameraController,
+  FreeCameraInputState,
+  createEmptyFreeCameraInput,
+} from '../camera/freeCamera';
 import { SpectatorCameraController } from '../camera/spectatorCamera';
 import {
   createTrackCurve,
@@ -40,18 +45,29 @@ const _forwardVec = new THREE.Vector3();
 
 interface GoKartTrackCanvasProps {
   cameraMode: CameraMode;
+  spectatorResetTick: number;
   touchInputRef: MutableRefObject<KartInputState>;
-  onToggleCamera: () => void;
+  freeCamTouchInputRef: MutableRefObject<FreeCameraInputState>;
+  onToggleFollow: () => void;
+  onToggleFreeCam: () => void;
+  onResetSpectator: () => void;
 }
 
 export function GoKartTrackCanvas({
   cameraMode,
+  spectatorResetTick,
   touchInputRef,
-  onToggleCamera,
+  freeCamTouchInputRef,
+  onToggleFollow,
+  onToggleFreeCam,
+  onResetSpectator,
 }: GoKartTrackCanvasProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const cameraModeRef = useRef<CameraMode>(cameraMode);
-  const onToggleCameraRef = useRef(onToggleCamera);
+  const spectatorResetTickRef = useRef<number>(spectatorResetTick);
+  const onToggleFollowRef = useRef(onToggleFollow);
+  const onToggleFreeCamRef = useRef(onToggleFreeCam);
+  const onResetSpectatorRef = useRef(onResetSpectator);
 
   useEffect(() => {
     cameraModeRef.current = cameraMode;
@@ -61,8 +77,20 @@ export function GoKartTrackCanvas({
   }, [cameraMode]);
 
   useEffect(() => {
-    onToggleCameraRef.current = onToggleCamera;
-  }, [onToggleCamera]);
+    spectatorResetTickRef.current = spectatorResetTick;
+  }, [spectatorResetTick]);
+
+  useEffect(() => {
+    onToggleFollowRef.current = onToggleFollow;
+  }, [onToggleFollow]);
+
+  useEffect(() => {
+    onToggleFreeCamRef.current = onToggleFreeCam;
+  }, [onToggleFreeCam]);
+
+  useEffect(() => {
+    onResetSpectatorRef.current = onResetSpectator;
+  }, [onResetSpectator]);
 
   useEffect(() => {
     const container = containerRef.current;
@@ -166,8 +194,9 @@ export function GoKartTrackCanvas({
     kartRig.group.rotation.y = kartState.yaw;
     scene.add(kartRig.group);
 
-    // Cinematic elevated three-quarter city skyline spectator camera
+    // Cinematic elevated three-quarter city skyline spectator camera & upright free-camera
     const spectatorCtrl = new SpectatorCameraController();
+    const freeCamCtrl = new FreeCameraController();
     const camera = new THREE.PerspectiveCamera(38, currentAspect, 14, 4800);
 
     const controls = new OrbitControls(camera, renderer.domElement);
@@ -185,6 +214,8 @@ export function GoKartTrackCanvas({
       kartState.z,
       controls.target,
     );
+    freeCamCtrl.syncFromCamera(camera);
+
     let specElevDeg = initialPose.elevationDeg;
     let specAzimDeg = initialPose.azimuthDeg;
     let specDist = initialPose.distance;
@@ -194,14 +225,16 @@ export function GoKartTrackCanvas({
     let userMovedOrbit = false;
     let returningToSpectator = false;
     let prevCameraMode: CameraMode = cameraModeRef.current;
+    let prevResetTick = spectatorResetTickRef.current;
 
-    // Keyboard input state (separated held keys from edge-triggered C toggle)
+    // Keyboard input states (kart + free camera)
     const keyInput: KartInputState = {
       accelerate: false,
       brakeReverse: false,
       steerLeft: false,
       steerRight: false,
     };
+    const freeKeyInput: FreeCameraInputState = createEmptyFreeCameraInput();
 
     const clearAllInputs = () => {
       keyInput.accelerate = false;
@@ -212,34 +245,91 @@ export function GoKartTrackCanvas({
       touchInputRef.current.brakeReverse = false;
       touchInputRef.current.steerLeft = false;
       touchInputRef.current.steerRight = false;
+
+      freeKeyInput.moveForward = false;
+      freeKeyInput.moveBackward = false;
+      freeKeyInput.moveLeft = false;
+      freeKeyInput.moveRight = false;
+      freeKeyInput.rise = false;
+      freeKeyInput.descend = false;
+      freeKeyInput.faster = false;
+      freeKeyInput.slower = false;
+
+      freeCamTouchInputRef.current.moveForward = false;
+      freeCamTouchInputRef.current.moveBackward = false;
+      freeCamTouchInputRef.current.moveLeft = false;
+      freeCamTouchInputRef.current.moveRight = false;
+      freeCamTouchInputRef.current.rise = false;
+      freeCamTouchInputRef.current.descend = false;
+      freeCamTouchInputRef.current.faster = false;
+      freeCamTouchInputRef.current.slower = false;
     };
 
     const onKeyDown = (e: KeyboardEvent) => {
+      freeKeyInput.faster = e.shiftKey;
+      freeKeyInput.slower = e.ctrlKey;
+
       switch (e.code) {
         case 'KeyW':
         case 'ArrowUp':
           e.preventDefault();
           keyInput.accelerate = true;
+          freeKeyInput.moveForward = true;
           break;
         case 'KeyS':
         case 'ArrowDown':
           e.preventDefault();
           keyInput.brakeReverse = true;
+          freeKeyInput.moveBackward = true;
           break;
         case 'KeyA':
         case 'ArrowLeft':
           e.preventDefault();
           keyInput.steerLeft = true;
+          freeKeyInput.moveLeft = true;
           break;
         case 'KeyD':
         case 'ArrowRight':
           e.preventDefault();
           keyInput.steerRight = true;
+          freeKeyInput.moveRight = true;
+          break;
+        case 'KeyR':
+          if (cameraModeRef.current === 'free') {
+            e.preventDefault();
+          }
+          freeKeyInput.rise = true;
+          break;
+        case 'KeyF':
+          if (cameraModeRef.current === 'free') {
+            e.preventDefault();
+          }
+          freeKeyInput.descend = true;
+          break;
+        case 'ShiftLeft':
+        case 'ShiftRight':
+          freeKeyInput.faster = true;
+          break;
+        case 'ControlLeft':
+        case 'ControlRight':
+          freeKeyInput.slower = true;
           break;
         case 'KeyC':
           if (!e.repeat) {
             e.preventDefault();
-            onToggleCameraRef.current();
+            onToggleFollowRef.current();
+          }
+          break;
+        case 'KeyV':
+          if (!e.repeat) {
+            e.preventDefault();
+            onToggleFreeCamRef.current();
+          }
+          break;
+        case 'Home':
+          if (!e.repeat) {
+            e.preventDefault();
+            onResetSpectatorRef.current();
           }
           break;
         case 'Space':
@@ -249,22 +339,43 @@ export function GoKartTrackCanvas({
     };
 
     const onKeyUp = (e: KeyboardEvent) => {
+      freeKeyInput.faster = e.shiftKey;
+      freeKeyInput.slower = e.ctrlKey;
+
       switch (e.code) {
         case 'KeyW':
         case 'ArrowUp':
           keyInput.accelerate = false;
+          freeKeyInput.moveForward = false;
           break;
         case 'KeyS':
         case 'ArrowDown':
           keyInput.brakeReverse = false;
+          freeKeyInput.moveBackward = false;
           break;
         case 'KeyA':
         case 'ArrowLeft':
           keyInput.steerLeft = false;
+          freeKeyInput.moveLeft = false;
           break;
         case 'KeyD':
         case 'ArrowRight':
           keyInput.steerRight = false;
+          freeKeyInput.moveRight = false;
+          break;
+        case 'KeyR':
+          freeKeyInput.rise = false;
+          break;
+        case 'KeyF':
+          freeKeyInput.descend = false;
+          break;
+        case 'ShiftLeft':
+        case 'ShiftRight':
+          freeKeyInput.faster = false;
+          break;
+        case 'ControlLeft':
+        case 'ControlRight':
+          freeKeyInput.slower = false;
           break;
       }
     };
@@ -272,6 +383,135 @@ export function GoKartTrackCanvas({
     const onVisibilityChange = () => {
       if (document.hidden) clearAllInputs();
     };
+
+    // Free-camera desktop mouse & mobile multi-touch gestures (disabled when not in 'free' mode)
+    const activeTouches = new Map<number, { x: number; y: number }>();
+    let activeMouseButton: number | null = null;
+    let lastMouseX = 0;
+    let lastMouseY = 0;
+
+    const getFirstTwoTouches = (): [{ x: number; y: number }, { x: number; y: number }] | null => {
+      const iter = activeTouches.values();
+      const first = iter.next();
+      const second = iter.next();
+      if (first.done || second.done) return null;
+      return [first.value, second.value];
+    };
+
+    const onCanvasContextMenu = (e: MouseEvent) => {
+      if (cameraModeRef.current === 'free') {
+        e.preventDefault();
+      }
+    };
+
+    const onCanvasMouseDown = (e: MouseEvent) => {
+      if (cameraModeRef.current === 'free' && e.button === 1) {
+        e.preventDefault();
+      }
+    };
+
+    const onCanvasPointerDown = (e: PointerEvent) => {
+      if (cameraModeRef.current !== 'free') return;
+
+      if (e.pointerType === 'touch') {
+        activeTouches.set(e.pointerId, { x: e.clientX, y: e.clientY });
+        try {
+          renderer.domElement.setPointerCapture(e.pointerId);
+        } catch {
+          // Ignore synthetic pointer events
+        }
+      } else if (e.button === 2 || e.button === 1) {
+        e.preventDefault();
+        activeMouseButton = e.button;
+        lastMouseX = e.clientX;
+        lastMouseY = e.clientY;
+        try {
+          renderer.domElement.setPointerCapture(e.pointerId);
+        } catch {
+          // Ignore synthetic pointer events
+        }
+      }
+    };
+
+    const onCanvasPointerMove = (e: PointerEvent) => {
+      if (cameraModeRef.current !== 'free') return;
+
+      if (e.pointerType === 'touch') {
+        const prev = activeTouches.get(e.pointerId);
+        if (!prev) return;
+
+        if (activeTouches.size === 1) {
+          const dx = e.clientX - prev.x;
+          const dy = e.clientY - prev.y;
+          prev.x = e.clientX;
+          prev.y = e.clientY;
+          freeCamCtrl.addLookDelta(dx, dy, true);
+        } else {
+          const pairBefore = getFirstTwoTouches();
+          if (!pairBefore) {
+            prev.x = e.clientX;
+            prev.y = e.clientY;
+            return;
+          }
+          const oldMidX = (pairBefore[0].x + pairBefore[1].x) * 0.5;
+          const oldMidY = (pairBefore[0].y + pairBefore[1].y) * 0.5;
+          const oldDist = Math.hypot(
+            pairBefore[1].x - pairBefore[0].x,
+            pairBefore[1].y - pairBefore[0].y,
+          );
+
+          prev.x = e.clientX;
+          prev.y = e.clientY;
+
+          const pairAfter = getFirstTwoTouches()!;
+          const newMidX = (pairAfter[0].x + pairAfter[1].x) * 0.5;
+          const newMidY = (pairAfter[0].y + pairAfter[1].y) * 0.5;
+          const newDist = Math.hypot(
+            pairAfter[1].x - pairAfter[0].x,
+            pairAfter[1].y - pairAfter[0].y,
+          );
+
+          freeCamCtrl.addPanDelta(newMidX - oldMidX, newMidY - oldMidY);
+          freeCamCtrl.addDolly((newDist - oldDist) * freeCamCtrl.config.pinchSensitivity);
+        }
+      } else if (activeMouseButton !== null) {
+        const dx = e.clientX - lastMouseX;
+        const dy = e.clientY - lastMouseY;
+        lastMouseX = e.clientX;
+        lastMouseY = e.clientY;
+
+        if (activeMouseButton === 2 || (e.buttons & 2) !== 0) {
+          freeCamCtrl.addLookDelta(dx, dy, false);
+        } else if (activeMouseButton === 1 || (e.buttons & 4) !== 0) {
+          freeCamCtrl.addPanDelta(dx, dy);
+        }
+      }
+    };
+
+    const onCanvasPointerUpOrCancel = (e: PointerEvent) => {
+      if (e.pointerType === 'touch') {
+        activeTouches.delete(e.pointerId);
+      } else if (e.button === activeMouseButton || e.type === 'pointercancel') {
+        activeMouseButton = null;
+      }
+    };
+
+    const onCanvasWheel = (e: WheelEvent) => {
+      if (cameraModeRef.current !== 'free') return;
+      e.preventDefault();
+      const unitScale = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? 120 : 1;
+      const dollyDelta = -e.deltaY * unitScale * freeCamCtrl.config.dollySensitivity;
+      freeCamCtrl.addDolly(dollyDelta);
+    };
+
+    renderer.domElement.addEventListener('contextmenu', onCanvasContextMenu);
+    renderer.domElement.addEventListener('mousedown', onCanvasMouseDown);
+    renderer.domElement.addEventListener('pointerdown', onCanvasPointerDown);
+    renderer.domElement.addEventListener('pointermove', onCanvasPointerMove);
+    renderer.domElement.addEventListener('pointerup', onCanvasPointerUpOrCancel);
+    renderer.domElement.addEventListener('pointercancel', onCanvasPointerUpOrCancel);
+    renderer.domElement.addEventListener('lostpointercapture', onCanvasPointerUpOrCancel);
+    renderer.domElement.addEventListener('wheel', onCanvasWheel, { passive: false });
 
     window.addEventListener('keydown', onKeyDown, { passive: false });
     window.addEventListener('keyup', onKeyUp);
@@ -322,12 +562,13 @@ export function GoKartTrackCanvas({
 
     // Continuous 60fps simulation loop with software-WebGL afterDraw pacing
     const clock = new THREE.Clock();
-    const mergedInput: KartInputState = {
+    const mergedKartInput: KartInputState = {
       accelerate: false,
       brakeReverse: false,
       steerLeft: false,
       steerRight: false,
     };
+    const mergedFreeInput: FreeCameraInputState = createEmptyFreeCameraInput();
 
     let frameId = 0;
     let disposed = false;
@@ -353,21 +594,76 @@ export function GoKartTrackCanvas({
       frameId = window.setTimeout(poll, 5);
     }
 
+    function syncAttributes(mode: CameraMode) {
+      if (!container) return;
+      container.setAttribute('data-camera-mode', mode);
+      container.setAttribute('data-on-track', String(kartState.onTrack));
+      container.setAttribute('data-kart-speed', kartState.speed.toFixed(2));
+      container.setAttribute('data-kart-x', kartState.x.toFixed(2));
+      container.setAttribute('data-kart-z', kartState.z.toFixed(2));
+      container.setAttribute('data-cam-x', camera.position.x.toFixed(2));
+      container.setAttribute('data-cam-y', camera.position.y.toFixed(2));
+      container.setAttribute('data-cam-z', camera.position.z.toFixed(2));
+      container.setAttribute('data-spectator-elevation', specElevDeg.toFixed(1));
+      container.setAttribute('data-spectator-azimuth', specAzimDeg.toFixed(1));
+      container.setAttribute('data-spectator-distance', specDist.toFixed(1));
+    }
+
     function tick() {
       if (disposed) return;
 
       const rawDt = clock.getDelta();
       const dt = Math.min(rawDt, 0.05);
 
-      const touch = touchInputRef.current;
-      mergedInput.accelerate = keyInput.accelerate || touch.accelerate;
-      mergedInput.brakeReverse = keyInput.brakeReverse || touch.brakeReverse;
-      mergedInput.steerLeft = keyInput.steerLeft || touch.steerLeft;
-      mergedInput.steerRight = keyInput.steerRight || touch.steerRight;
+      const mode = cameraModeRef.current;
+      const resetTick = spectatorResetTickRef.current;
 
-      kartState = stepKartPhysics(kartState, mergedInput, dt, frames);
+      // Mode & explicit Home reset transitions
+      if (mode !== prevCameraMode) {
+        prevCameraMode = mode;
+        activeMouseButton = null;
+        activeTouches.clear();
+        clearAllInputs();
 
-      // Update 3D kart transform & wheel animations
+        if (mode === 'free') {
+          controls.enabled = false;
+          returningToSpectator = false;
+          userMovedOrbit = false;
+          freeCamCtrl.syncFromCamera(camera);
+        } else if (mode === 'spectator') {
+          returningToSpectator = true;
+          userMovedOrbit = false;
+        } else {
+          returningToSpectator = false;
+        }
+      }
+
+      if (resetTick !== prevResetTick) {
+        prevResetTick = resetTick;
+        if (mode === 'spectator') {
+          userMovedOrbit = false;
+          returningToSpectator = true;
+          spectatorCtrl.resetDrift();
+        }
+      }
+
+      // Kart physics (only takes player driving inputs when not in Free-Cam mode)
+      if (mode === 'free') {
+        mergedKartInput.accelerate = false;
+        mergedKartInput.brakeReverse = false;
+        mergedKartInput.steerLeft = false;
+        mergedKartInput.steerRight = false;
+      } else {
+        const touch = touchInputRef.current;
+        mergedKartInput.accelerate = keyInput.accelerate || touch.accelerate;
+        mergedKartInput.brakeReverse = keyInput.brakeReverse || touch.brakeReverse;
+        mergedKartInput.steerLeft = keyInput.steerLeft || touch.steerLeft;
+        mergedKartInput.steerRight = keyInput.steerRight || touch.steerRight;
+      }
+
+      kartState = stepKartPhysics(kartState, mergedKartInput, dt, frames);
+
+      // Update 3D kart transform & wheel animations (world itself never moves/rotates/scales)
       kartRig.group.position.set(kartState.x, 0.04, kartState.z);
       kartRig.group.rotation.y = kartState.yaw;
 
@@ -378,19 +674,33 @@ export function GoKartTrackCanvas({
         w.rotation.x = kartState.wheelSpin;
       }
 
-      // Camera mode handling
-      const mode = cameraModeRef.current;
-      if (mode !== prevCameraMode) {
-        prevCameraMode = mode;
-        if (mode === 'spectator') {
-          returningToSpectator = true;
-          userMovedOrbit = false;
-        } else {
-          returningToSpectator = false;
-        }
-      }
+      // Update camera position & orientation only
+      if (mode === 'free') {
+        controls.enabled = false;
+        const touchFree = freeCamTouchInputRef.current;
+        mergedFreeInput.moveForward = freeKeyInput.moveForward || touchFree.moveForward;
+        mergedFreeInput.moveBackward = freeKeyInput.moveBackward || touchFree.moveBackward;
+        mergedFreeInput.moveLeft = freeKeyInput.moveLeft || touchFree.moveLeft;
+        mergedFreeInput.moveRight = freeKeyInput.moveRight || touchFree.moveRight;
+        mergedFreeInput.rise = freeKeyInput.rise || touchFree.rise;
+        mergedFreeInput.descend = freeKeyInput.descend || touchFree.descend;
+        mergedFreeInput.faster = freeKeyInput.faster || touchFree.faster;
+        mergedFreeInput.slower = freeKeyInput.slower || touchFree.slower;
 
-      if (mode === 'follow') {
+        freeCamCtrl.update(camera, mergedFreeInput, dt);
+
+        const fogAlpha = 1 - Math.exp(-3.6 * dt);
+        horizonFog.near = THREE.MathUtils.lerp(
+          horizonFog.near,
+          Math.max(580, camera.position.y * 1.4),
+          fogAlpha,
+        );
+        horizonFog.far = THREE.MathUtils.lerp(
+          horizonFog.far,
+          Math.max(1550, camera.position.y * 2.8),
+          fogAlpha,
+        );
+      } else if (mode === 'follow') {
         controls.enabled = false;
         _kartPos.set(kartState.x, 0.04, kartState.z);
         _forwardVec.set(Math.sin(kartState.yaw), 0, Math.cos(kartState.yaw));
@@ -476,14 +786,7 @@ export function GoKartTrackCanvas({
       // Expose testable attributes at <= 10Hz without triggering React state renders
       attrTickCounter++;
       if (attrTickCounter % 6 === 0 && container) {
-        container.setAttribute('data-camera-mode', mode);
-        container.setAttribute('data-on-track', String(kartState.onTrack));
-        container.setAttribute('data-kart-speed', kartState.speed.toFixed(2));
-        container.setAttribute('data-kart-x', kartState.x.toFixed(2));
-        container.setAttribute('data-kart-z', kartState.z.toFixed(2));
-        container.setAttribute('data-spectator-elevation', specElevDeg.toFixed(1));
-        container.setAttribute('data-spectator-azimuth', specAzimDeg.toFixed(1));
-        container.setAttribute('data-spectator-distance', specDist.toFixed(1));
+        syncAttributes(mode);
       }
 
       renderer.render(scene, camera);
@@ -495,14 +798,7 @@ export function GoKartTrackCanvas({
     }
 
     container.setAttribute('data-state', 'ready');
-    container.setAttribute('data-camera-mode', cameraModeRef.current);
-    container.setAttribute('data-on-track', String(kartState.onTrack));
-    container.setAttribute('data-kart-speed', '0.00');
-    container.setAttribute('data-kart-x', kartState.x.toFixed(2));
-    container.setAttribute('data-kart-z', kartState.z.toFixed(2));
-    container.setAttribute('data-spectator-elevation', specElevDeg.toFixed(1));
-    container.setAttribute('data-spectator-azimuth', specAzimDeg.toFixed(1));
-    container.setAttribute('data-spectator-distance', specDist.toFixed(1));
+    syncAttributes(cameraModeRef.current);
 
     tick();
 
@@ -510,6 +806,14 @@ export function GoKartTrackCanvas({
       disposed = true;
       cancelAnimationFrame(frameId);
       clearTimeout(frameId);
+      renderer.domElement.removeEventListener('contextmenu', onCanvasContextMenu);
+      renderer.domElement.removeEventListener('mousedown', onCanvasMouseDown);
+      renderer.domElement.removeEventListener('pointerdown', onCanvasPointerDown);
+      renderer.domElement.removeEventListener('pointermove', onCanvasPointerMove);
+      renderer.domElement.removeEventListener('pointerup', onCanvasPointerUpOrCancel);
+      renderer.domElement.removeEventListener('pointercancel', onCanvasPointerUpOrCancel);
+      renderer.domElement.removeEventListener('lostpointercapture', onCanvasPointerUpOrCancel);
+      renderer.domElement.removeEventListener('wheel', onCanvasWheel);
       window.removeEventListener('keydown', onKeyDown);
       window.removeEventListener('keyup', onKeyUp);
       window.removeEventListener('blur', clearAllInputs);
@@ -530,7 +834,7 @@ export function GoKartTrackCanvas({
         container.removeChild(renderer.domElement);
       }
     };
-  }, [touchInputRef]);
+  }, [touchInputRef, freeCamTouchInputRef]);
 
   return (
     <div

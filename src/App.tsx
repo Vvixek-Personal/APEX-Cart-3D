@@ -4,12 +4,18 @@
  */
 
 import { useCallback, useRef, useState } from 'react';
+import {
+  FreeCameraInputState,
+  createEmptyFreeCameraInput,
+} from './camera/freeCamera';
 import { CameraMode, TouchControls } from './components/TouchControls';
 import type { KartInputState } from './kart/kartPhysics';
 import { GoKartTrackCanvas } from './scene/GoKartTrackCanvas';
 
 export default function App() {
   const [cameraMode, setCameraMode] = useState<CameraMode>('spectator');
+  const [spectatorResetTick, setSpectatorResetTick] = useState(0);
+
   const touchInputRef = useRef<KartInputState>({
     accelerate: false,
     brakeReverse: false,
@@ -17,13 +23,33 @@ export default function App() {
     steerRight: false,
   });
 
-  const handleToggleCamera = useCallback(() => {
-    setCameraMode((prev) => (prev === 'spectator' ? 'follow' : 'spectator'));
+  const freeCamTouchInputRef = useRef<FreeCameraInputState>(
+    createEmptyFreeCameraInput(),
+  );
+
+  const handleToggleFollow = useCallback(() => {
+    setCameraMode((prev) => (prev === 'follow' ? 'spectator' : 'follow'));
   }, []);
 
-  const handleTouchInput = useCallback(
+  const handleToggleFreeCam = useCallback(() => {
+    setCameraMode((prev) => (prev === 'free' ? 'spectator' : 'free'));
+  }, []);
+
+  const handleResetSpectator = useCallback(() => {
+    setCameraMode('spectator');
+    setSpectatorResetTick((n) => n + 1);
+  }, []);
+
+  const handleKartTouchInput = useCallback(
     (key: keyof KartInputState, pressed: boolean) => {
       touchInputRef.current[key] = pressed;
+    },
+    [],
+  );
+
+  const handleFreeCamTouchInput = useCallback(
+    (key: keyof FreeCameraInputState, pressed: boolean) => {
+      freeCamTouchInputRef.current[key] = pressed;
     },
     [],
   );
@@ -32,13 +58,20 @@ export default function App() {
     <main className="relative h-screen w-screen overflow-hidden select-none">
       <GoKartTrackCanvas
         cameraMode={cameraMode}
+        spectatorResetTick={spectatorResetTick}
         touchInputRef={touchInputRef}
-        onToggleCamera={handleToggleCamera}
+        freeCamTouchInputRef={freeCamTouchInputRef}
+        onToggleFollow={handleToggleFollow}
+        onToggleFreeCam={handleToggleFreeCam}
+        onResetSpectator={handleResetSpectator}
       />
       <TouchControls
         cameraMode={cameraMode}
-        onToggleCamera={handleToggleCamera}
-        onInputChange={handleTouchInput}
+        onToggleFollow={handleToggleFollow}
+        onToggleFreeCam={handleToggleFreeCam}
+        onResetSpectator={handleResetSpectator}
+        onKartInputChange={handleKartTouchInput}
+        onFreeCamInputChange={handleFreeCamTouchInput}
       />
     </main>
   );
