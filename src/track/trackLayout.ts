@@ -14,14 +14,20 @@ export const BANNER_POST_OFFSET = TRACK_HALF + 1.35;
 export const BANNER_CLEAR_HEIGHT = 6.2;
 export const BANNER_TOTAL_HEIGHT = 10.8;
 
-// Open-air stadium bounds strictly outside the 240x240 grass field (FIELD_HALF = 120)
+// Stadium & outer landscaped park bounds strictly outside the 240x240 grass field (FIELD_HALF = 120)
 export const STADIUM_EXPONENT = 4;
 export const STADIUM_CANOPY_INNER = 160;
 export const STADIUM_FACADE_RADIUS = 176;
 export const STADIUM_CANOPY_OUTER = 183;
 export const STADIUM_CONCOURSE_OUTER = 186;
+export const STADIUM_INNER_STAND_CLEAR = 128;
+export const STADIUM_NORTH_CANOPY_HEIGHT = 24;
+export const STADIUM_TOWER_OFFSET = 158;
 export const STADIUM_TOWER_RADIUS = 179;
-export const STADIUM_TOWER_HEIGHT = 40;
+export const STADIUM_TOWER_HEIGHT = 44;
+
+export const PARK_HALF = 212;
+export const PARK_SIZE = PARK_HALF * 2;
 
 /**
  * Evaluates a point on the curved stadium superellipse perimeter at angle theta.
@@ -223,7 +229,7 @@ export function computeSpectatorCameraPose(aspect: number): SpectatorCameraPose 
 
   // Compute minimum distance along `dir` so all stadium perimeter points, tower tops,
   // field corners, and banner tops stay cleanly inside [-0.88, 0.88] NDC on both axes.
-  const target = new THREE.Vector3(0, 2.0, 0);
+  const target = new THREE.Vector3(0, 4.0, 0);
   const testPoints: THREE.Vector3[] = [
     new THREE.Vector3(-FIELD_HALF, 0, -FIELD_HALF),
     new THREE.Vector3(FIELD_HALF, 0, -FIELD_HALF),
@@ -231,23 +237,32 @@ export function computeSpectatorCameraPose(aspect: number): SpectatorCameraPose 
     new THREE.Vector3(FIELD_HALF, 0, FIELD_HALF),
     new THREE.Vector3(40 * TRACK_LAYOUT_SCALE, BANNER_TOTAL_HEIGHT, 10 * TRACK_LAYOUT_SCALE),
     new THREE.Vector3(40 * TRACK_LAYOUT_SCALE, BANNER_TOTAL_HEIGHT, 31 * TRACK_LAYOUT_SCALE),
+    // Outer landscaped park corners
+    new THREE.Vector3(-PARK_HALF, -1.0, -PARK_HALF),
+    new THREE.Vector3(PARK_HALF, -1.0, -PARK_HALF),
+    new THREE.Vector3(-PARK_HALF, -1.0, PARK_HALF),
+    new THREE.Vector3(PARK_HALF, -1.0, PARK_HALF),
+    // Perimeter tree canopies (~14 tall along outer park edge)
+    new THREE.Vector3(-PARK_HALF + 8, 14, -PARK_HALF + 8),
+    new THREE.Vector3(PARK_HALF - 8, 14, -PARK_HALF + 8),
+    // North multi-tier grandstand roof & scoreboard bounds
+    new THREE.Vector3(-102, STADIUM_NORTH_CANOPY_HEIGHT, -174),
+    new THREE.Vector3(102, STADIUM_NORTH_CANOPY_HEIGHT, -174),
+    new THREE.Vector3(-124, 24, -142),
+    // East pavilion & West/South stands
+    new THREE.Vector3(166, 15, 0),
+    new THREE.Vector3(-162, 14, 0),
+    new THREE.Vector3(0, 10, 160),
+    // Corner floodlight towers
+    new THREE.Vector3(-STADIUM_TOWER_OFFSET, STADIUM_TOWER_HEIGHT, -STADIUM_TOWER_OFFSET),
+    new THREE.Vector3(STADIUM_TOWER_OFFSET, STADIUM_TOWER_HEIGHT, -STADIUM_TOWER_OFFSET),
+    new THREE.Vector3(-STADIUM_TOWER_OFFSET, STADIUM_TOWER_HEIGHT, STADIUM_TOWER_OFFSET),
+    new THREE.Vector3(STADIUM_TOWER_OFFSET, STADIUM_TOWER_HEIGHT, STADIUM_TOWER_OFFSET),
   ];
 
-  // Sample outer stadium concourse, roof canopy, and corner floodlight tower tops
-  for (let i = 0; i < 16; i++) {
-    const theta = (i / 16) * Math.PI * 2;
-    const outer = evaluateStadiumPoint(theta, STADIUM_CONCOURSE_OUTER);
-    testPoints.push(new THREE.Vector3(outer.x, -3.2, outer.z));
-    testPoints.push(new THREE.Vector3(outer.x, 15.5, outer.z));
-  }
-  for (const cornerAngle of [Math.PI * 0.25, Math.PI * 0.75, Math.PI * 1.25, Math.PI * 1.75]) {
-    const tower = evaluateStadiumPoint(cornerAngle, STADIUM_TOWER_RADIUS);
-    testPoints.push(new THREE.Vector3(tower.x, STADIUM_TOWER_HEIGHT, tower.z));
-  }
-
-  const cam = new THREE.PerspectiveCamera(fov, safeAspect, 1, 3600);
-  let low = 200;
-  let high = 2600;
+  const cam = new THREE.PerspectiveCamera(fov, safeAspect, 1, 4400);
+  let low = 240;
+  let high = 3200;
 
   for (let iter = 0; iter < 34; iter++) {
     const mid = (low + high) * 0.5;
@@ -261,8 +276,8 @@ export function computeSpectatorCameraPose(aspect: number): SpectatorCameraPose 
       maxAbsNdc = Math.max(maxAbsNdc, Math.abs(projected.x), Math.abs(projected.y));
     }
 
-    // Leave ~6-7% breathing margin around every edge (<= 0.88 NDC)
-    if (maxAbsNdc > 0.88) {
+    // Leave comfortable breathing margin around every edge (<= 0.89 NDC)
+    if (maxAbsNdc > 0.89) {
       low = mid;
     } else {
       high = mid;
@@ -274,8 +289,8 @@ export function computeSpectatorCameraPose(aspect: number): SpectatorCameraPose 
     position: target.clone().addScaledVector(dir, distance),
     target,
     fov,
-    near: Math.max(12, distance * 0.03),
-    far: 3800,
+    near: Math.max(16, distance * 0.03),
+    far: 4400,
   };
 }
 

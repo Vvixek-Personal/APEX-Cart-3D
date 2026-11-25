@@ -2,13 +2,11 @@ import * as THREE from 'three';
 import {
   FIELD_HALF,
   FIELD_THICKNESS,
-  STADIUM_CANOPY_INNER,
-  STADIUM_CANOPY_OUTER,
-  STADIUM_CONCOURSE_OUTER,
-  STADIUM_FACADE_RADIUS,
+  PARK_HALF,
+  PARK_SIZE,
+  STADIUM_NORTH_CANOPY_HEIGHT,
   STADIUM_TOWER_HEIGHT,
-  STADIUM_TOWER_RADIUS,
-  evaluateStadiumPoint,
+  STADIUM_TOWER_OFFSET,
 } from '../track/trackLayout';
 import { ProceduralTextureSet } from './textures';
 
@@ -17,582 +15,1259 @@ export interface StadiumBuildResult {
   dispose: () => void;
 }
 
-const RING_SEGMENTS = 96; // Divisible by 8 so cardinals (0,24,48,72) & corners (12,36,60,84) match exactly
-
-/**
- * Builds the flat open concourse floor connecting the square 240x240 grass perimeter
- * cleanly out to the curved outer stadium podium edge, plus the vertical podium skirt.
- */
-function buildConcourseDeckAndSkirt(
-  yTop: number,
-  yBottom: number,
-): { deckGeo: THREE.BufferGeometry; skirtGeo: THREE.BufferGeometry } {
-  const n = RING_SEGMENTS;
-  const innerInset = FIELD_HALF - 0.6;
-
-  // Top concourse surface
-  const deckPos = new Float32Array((n + 1) * 2 * 3);
-  const deckNorm = new Float32Array((n + 1) * 2 * 3);
-  const deckUv = new Float32Array((n + 1) * 2 * 2);
-  const deckIdx: number[] = [];
-
-  // Outer vertical podium skirt
-  const skirtPos = new Float32Array((n + 1) * 2 * 3);
-  const skirtNorm = new Float32Array((n + 1) * 2 * 3);
-  const skirtUv = new Float32Array((n + 1) * 2 * 2);
-  const skirtIdx: number[] = [];
-
-  for (let i = 0; i <= n; i++) {
-    const theta = ((i % n) / n) * Math.PI * 2;
-    const cos = Math.cos(theta);
-    const sin = Math.sin(theta);
-
-    // Exact ray intersection with the inner square boundary
-    const squareScale = innerInset / Math.max(Math.abs(cos), Math.abs(sin));
-    const ix = cos * squareScale;
-    const iz = sin * squareScale;
-
-    // Smooth curved stadium perimeter
-    const outer = evaluateStadiumPoint(theta, STADIUM_CONCOURSE_OUTER);
-
-    const base = i * 2;
-    deckPos[base * 3] = ix;
-    deckPos[base * 3 + 1] = yTop;
-    deckPos[base * 3 + 2] = iz;
-    deckPos[(base + 1) * 3] = outer.x;
-    deckPos[(base + 1) * 3 + 1] = yTop;
-    deckPos[(base + 1) * 3 + 2] = outer.z;
-
-    deckNorm[base * 3] = 0;
-    deckNorm[base * 3 + 1] = 1;
-    deckNorm[base * 3 + 2] = 0;
-    deckNorm[(base + 1) * 3] = 0;
-    deckNorm[(base + 1) * 3 + 1] = 1;
-    deckNorm[(base + 1) * 3 + 2] = 0;
-
-    deckUv[base * 2] = ix / 22;
-    deckUv[base * 2 + 1] = iz / 22;
-    deckUv[(base + 1) * 2] = outer.x / 22;
-    deckUv[(base + 1) * 2 + 1] = outer.z / 22;
-
-    // Outward normal for skirt
-    const len = Math.hypot(outer.x, outer.z) || 1;
-    const nx = outer.x / len;
-    const nz = outer.z / len;
-
-    skirtPos[base * 3] = outer.x;
-    skirtPos[base * 3 + 1] = yTop;
-    skirtPos[base * 3 + 2] = outer.z;
-    skirtPos[(base + 1) * 3] = outer.x;
-    skirtPos[(base + 1) * 3 + 1] = yBottom;
-    skirtPos[(base + 1) * 3 + 2] = outer.z;
-
-    skirtNorm[base * 3] = nx;
-    skirtNorm[base * 3 + 1] = 0;
-    skirtNorm[base * 3 + 2] = nz;
-    skirtNorm[(base + 1) * 3] = nx;
-    skirtNorm[(base + 1) * 3 + 1] = 0;
-    skirtNorm[(base + 1) * 3 + 2] = nz;
-
-    skirtUv[base * 2] = i / 8;
-    skirtUv[base * 2 + 1] = 1;
-    skirtUv[(base + 1) * 2] = i / 8;
-    skirtUv[(base + 1) * 2 + 1] = 0;
-
-    if (i < n) {
-      const a = base;
-      const b = base + 1;
-      const c = base + 2;
-      const d = base + 3;
-      deckIdx.push(a, c, b, c, d, b);
-      skirtIdx.push(a, c, b, c, d, b);
-    }
-  }
-
-  const deckGeo = new THREE.BufferGeometry();
-  deckGeo.setAttribute('position', new THREE.BufferAttribute(deckPos, 3));
-  deckGeo.setAttribute('normal', new THREE.BufferAttribute(deckNorm, 3));
-  deckGeo.setAttribute('uv', new THREE.BufferAttribute(deckUv, 2));
-  deckGeo.setIndex(deckIdx);
-  deckGeo.computeBoundingSphere();
-
-  const skirtGeo = new THREE.BufferGeometry();
-  skirtGeo.setAttribute('position', new THREE.BufferAttribute(skirtPos, 3));
-  skirtGeo.setAttribute('normal', new THREE.BufferAttribute(skirtNorm, 3));
-  skirtGeo.setAttribute('uv', new THREE.BufferAttribute(skirtUv, 2));
-  skirtGeo.setIndex(skirtIdx);
-  skirtGeo.computeBoundingSphere();
-
-  return { deckGeo, skirtGeo };
+interface SeatInstanceSpec {
+  x: number;
+  y: number;
+  z: number;
+  yaw: number;
+  color: THREE.Color;
 }
 
 /**
- * Builds a closed curved ring extrusion with sharp flat-faced normals for stadium
- * facade bands, roof canopy shells, fascia trims, and open concourse walkways.
- * Profile points must be ordered [ (rIn, yBot), (rIn, yTop), (rOut, yTop), (rOut, yBot) ].
+ * Builds a single merged low-poly stadium bucket seat (seat pan + backrest = 24 triangles)
+ * facing local +Z with bottom pivot at y = 0.
  */
-function buildClosedCurvedProfileGeo(
-  profile: ReadonlyArray<[number, number]>,
-  startIndex = 0,
-  endIndex = RING_SEGMENTS,
-  closed = true,
-): THREE.BufferGeometry {
-  const segCount = endIndex - startIndex;
-  const faceCount = profile.length;
+function createMergedSeatGeometry(): THREE.BufferGeometry {
+  const panW = 1.15;
+  const panH = 0.18;
+  const panD = 0.85;
+  const backH = 0.72;
+  const backD = 0.16;
 
-  const positions: number[] = [];
-  const uvs: number[] = [];
-  const indices: number[] = [];
+  // Combine two BoxGeometries manually into one BufferGeometry for single-draw-call instancing
+  const boxPan = new THREE.BoxGeometry(panW, panH, panD);
+  boxPan.translate(0, panH * 0.5, 0.06);
 
-  let vertCursor = 0;
+  const boxBack = new THREE.BoxGeometry(panW, backH, backD);
+  boxBack.rotateX(-0.12);
+  boxBack.translate(0, panH + backH * 0.45, -panD * 0.42);
 
-  for (let f = 0; f < faceCount; f++) {
-    const p0 = profile[f];
-    const p1 = profile[(f + 1) % faceCount];
+  const posA = boxPan.attributes.position.array as Float32Array;
+  const normA = boxPan.attributes.normal.array as Float32Array;
+  const idxA = boxPan.index!.array;
 
-    const faceBase = vertCursor;
-    for (let s = 0; s <= segCount; s++) {
-      const idx = (startIndex + s) % RING_SEGMENTS;
-      const theta = (idx / RING_SEGMENTS) * Math.PI * 2;
-      const c0 = evaluateStadiumPoint(theta, p0[0]);
-      const c1 = evaluateStadiumPoint(theta, p1[0]);
+  const posB = boxBack.attributes.position.array as Float32Array;
+  const normB = boxBack.attributes.normal.array as Float32Array;
+  const idxB = boxBack.index!.array;
 
-      positions.push(c0.x, p0[1], c0.z);
-      positions.push(c1.x, p1[1], c1.z);
+  const positions = new Float32Array(posA.length + posB.length);
+  positions.set(posA, 0);
+  positions.set(posB, posA.length);
 
-      uvs.push(s / 8, 0);
-      uvs.push(s / 8, 1);
-      vertCursor += 2;
-    }
+  const normals = new Float32Array(normA.length + normB.length);
+  normals.set(normA, 0);
+  normals.set(normB, normA.length);
 
-    for (let s = 0; s < segCount; s++) {
-      const a = faceBase + s * 2;
-      const b = a + 1;
-      const c = a + 2;
-      const d = a + 3;
-      indices.push(a, c, b, c, d, b);
-    }
+  const vertOffset = posA.length / 3;
+  const indices = new Uint16Array(idxA.length + idxB.length);
+  indices.set(idxA, 0);
+  for (let i = 0; i < idxB.length; i++) {
+    indices[idxA.length + i] = idxB[i] + vertOffset;
   }
 
-  // End caps when building open-portal segmented arcs (like ground-level corner walls)
-  if (!closed) {
-    for (const endIdx of [startIndex, endIndex]) {
-      const theta = ((endIdx % RING_SEGMENTS) / RING_SEGMENTS) * Math.PI * 2;
-      const capBase = vertCursor;
-      for (let f = 0; f < faceCount; f++) {
-        const pt = evaluateStadiumPoint(theta, profile[f][0]);
-        positions.push(pt.x, profile[f][1], pt.z);
-        uvs.push(f / 4, endIdx === startIndex ? 0 : 1);
-        vertCursor++;
-      }
-      if (endIdx === startIndex) {
-        indices.push(capBase, capBase + 1, capBase + 2, capBase, capBase + 2, capBase + 3);
-      } else {
-        indices.push(capBase, capBase + 2, capBase + 1, capBase, capBase + 3, capBase + 2);
-      }
-    }
-  }
+  boxPan.dispose();
+  boxBack.dispose();
 
-  const geo = new THREE.BufferGeometry();
-  geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
-  geo.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
-  geo.setIndex(indices);
-  geo.computeVertexNormals();
-  geo.computeBoundingSphere();
-  return geo;
+  const merged = new THREE.BufferGeometry();
+  merged.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+  merged.setAttribute('normal', new THREE.BufferAttribute(normals, 3));
+  merged.setIndex(new THREE.BufferAttribute(indices, 1));
+  merged.computeBoundingSphere();
+  return merged;
 }
 
 /**
- * Builds the lightweight open-air stadium around the 240x240 grass field:
- * - Open concourse plaza outside the grass square (no seats, no spectators)
- * - Curved outer architectural facade with wide cardinal open concourse portals
- * - Swept cantilevered stadium roof canopy with radial structural trusses
- * - Instanced inner & outer support columns and exterior architectural fins
- * - 4 corner LED floodlight towers rising outside the stadium corners
+ * Helper to transform local stand point (lx, ly, lz) to world XZ around (cx, cz) rotated by yaw.
+ */
+function toWorldXZ(
+  cx: number,
+  cz: number,
+  yaw: number,
+  lx: number,
+  lz: number,
+): { x: number; z: number } {
+  const c = Math.cos(yaw);
+  const s = Math.sin(yaw);
+  return {
+    x: cx + lx * c + lz * s,
+    z: cz - lx * s + lz * c,
+  };
+}
+
+/**
+ * Builds the complete stadium + landscaped outer perimeter outside the 240x240 grass field:
+ * - Large multi-tier North Main Grandstand with colored seating sections, stair aisles,
+ *   concourse levels, vomitory entrances, structural columns, and cantilevered roof canopy
+ * - Smaller tiered stands on West and South sides with aisles, entrances, and columns
+ * - Distinct East Pavilion with covered viewing deck, louvered/glazed facade, and wing canopy
+ * - Scoreboard, timing display pylon, entrance gates, stadium banners, and 4 corner floodlight towers
+ * - Outer landscaped green park lawn, walkways, curbed planted beds, shrubs, and perimeter trees
  */
 export function buildStadiumArchitecture(textures: ProceduralTextureSet): StadiumBuildResult {
   const group = new THREE.Group();
-  group.name = 'OPEN_AIR_STADIUM';
+  group.name = 'COMPLETE_STADIUM';
 
   const geometries: THREE.BufferGeometry[] = [];
   const materials: THREE.Material[] = [];
 
-  // Shared PBR architectural materials
-  const concourseMat = new THREE.MeshStandardMaterial({
-    color: 0xffffff,
-    map: textures.concourseColor,
-    roughness: 0.88,
-    metalness: 0.02,
-  });
-  const podiumSkirtMat = new THREE.MeshStandardMaterial({
-    color: 0x677282,
-    roughness: 0.86,
-    metalness: 0.08,
-  });
-  const walkwayBandMat = new THREE.MeshStandardMaterial({
-    color: 0x8994a4,
-    roughness: 0.82,
-    metalness: 0.06,
-  });
-  const facadeWhiteMat = new THREE.MeshStandardMaterial({
-    color: 0xe6ecf2,
-    roughness: 0.5,
-    metalness: 0.08,
-  });
-  const columnMat = new THREE.MeshStandardMaterial({
-    color: 0xcbd4df,
-    roughness: 0.44,
-    metalness: 0.16,
-  });
-  const structuralSteelMat = new THREE.MeshStandardMaterial({
-    color: 0x354050,
-    roughness: 0.46,
-    metalness: 0.56,
-  });
-  const canopyRoofMat = new THREE.MeshStandardMaterial({
-    color: 0xf8fbff,
-    roughness: 0.44,
-    metalness: 0.06,
-  });
-  const canopyRibMat = new THREE.MeshStandardMaterial({
-    color: 0x7b8798,
-    roughness: 0.52,
-    metalness: 0.35,
-  });
-  const accentTrimMat = new THREE.MeshStandardMaterial({
-    color: 0xe04637,
-    roughness: 0.45,
-    metalness: 0.12,
-  });
-  const floodlightFaceMat = new THREE.MeshStandardMaterial({
-    color: 0xffffff,
-    map: textures.floodlightBank,
-    emissive: new THREE.Color(0xfff5d8),
-    emissiveMap: textures.floodlightBank,
-    emissiveIntensity: 0.48,
-    roughness: 0.25,
-    metalness: 0.1,
-  });
+  const trackGeo = <T extends THREE.BufferGeometry>(g: T): T => {
+    geometries.push(g);
+    return g;
+  };
+  const trackMat = <T extends THREE.Material>(m: T): T => {
+    materials.push(m);
+    return m;
+  };
 
-  materials.push(
-    concourseMat,
-    podiumSkirtMat,
-    walkwayBandMat,
-    facadeWhiteMat,
-    columnMat,
-    structuralSteelMat,
-    canopyRoofMat,
-    canopyRibMat,
-    accentTrimMat,
-    floodlightFaceMat,
+  // Shared materials
+  const parkLawnMat = trackMat(
+    new THREE.MeshStandardMaterial({
+      color: 0xffffff,
+      map: textures.parkLawnColor,
+      roughness: 0.92,
+      metalness: 0.0,
+    }),
+  );
+  const parkEarthMat = trackMat(
+    new THREE.MeshStandardMaterial({
+      color: 0x7b6043,
+      roughness: 0.95,
+      metalness: 0.0,
+    }),
+  );
+  const concourseMat = trackMat(
+    new THREE.MeshStandardMaterial({
+      color: 0xffffff,
+      map: textures.concourseColor,
+      roughness: 0.86,
+      metalness: 0.02,
+    }),
+  );
+  const pathStoneMat = trackMat(
+    new THREE.MeshStandardMaterial({
+      color: 0xd0d6de,
+      roughness: 0.84,
+      metalness: 0.04,
+    }),
+  );
+  const concreteLightMat = trackMat(
+    new THREE.MeshStandardMaterial({
+      color: 0xd9e0e8,
+      roughness: 0.68,
+      metalness: 0.06,
+    }),
+  );
+  const concreteMidMat = trackMat(
+    new THREE.MeshStandardMaterial({
+      color: 0x9aa5b4,
+      roughness: 0.74,
+      metalness: 0.08,
+    }),
+  );
+  const facadeWhiteMat = trackMat(
+    new THREE.MeshStandardMaterial({
+      color: 0xf0f4f8,
+      roughness: 0.45,
+      metalness: 0.08,
+    }),
+  );
+  const darkSteelMat = trackMat(
+    new THREE.MeshStandardMaterial({
+      color: 0x2d3745,
+      roughness: 0.46,
+      metalness: 0.56,
+    }),
+  );
+  const canopyRoofMat = trackMat(
+    new THREE.MeshStandardMaterial({
+      color: 0xf8fbff,
+      roughness: 0.42,
+      metalness: 0.06,
+    }),
+  );
+  const canopySoffitMat = trackMat(
+    new THREE.MeshStandardMaterial({
+      color: 0xc2cbd6,
+      roughness: 0.58,
+      metalness: 0.14,
+    }),
+  );
+  const accentRedMat = trackMat(
+    new THREE.MeshStandardMaterial({
+      color: 0xdc4234,
+      roughness: 0.44,
+      metalness: 0.1,
+    }),
+  );
+  const woodBronzeMat = trackMat(
+    new THREE.MeshStandardMaterial({
+      color: 0x9c6c44,
+      roughness: 0.58,
+      metalness: 0.18,
+    }),
+  );
+  const pavilionGlassMat = trackMat(
+    new THREE.MeshStandardMaterial({
+      color: 0x6ea8cc,
+      roughness: 0.18,
+      metalness: 0.45,
+      transparent: true,
+      opacity: 0.76,
+    }),
+  );
+  const stairAisleMat = trackMat(
+    new THREE.MeshStandardMaterial({
+      color: 0xeff3f7,
+      roughness: 0.78,
+      metalness: 0.02,
+    }),
+  );
+  const darkPortalMat = trackMat(
+    new THREE.MeshStandardMaterial({
+      color: 0x1b222c,
+      roughness: 0.9,
+      metalness: 0.05,
+    }),
+  );
+  const mulchBedMat = trackMat(
+    new THREE.MeshStandardMaterial({
+      color: 0x5d4531,
+      roughness: 0.95,
+      metalness: 0.0,
+    }),
+  );
+  const trunkMat = trackMat(
+    new THREE.MeshStandardMaterial({
+      color: 0x6d5039,
+      roughness: 0.92,
+      metalness: 0.0,
+    }),
+  );
+  const foliageMat = trackMat(
+    new THREE.MeshStandardMaterial({
+      color: 0xffffff,
+      roughness: 0.85,
+      metalness: 0.0,
+    }),
+  );
+  const floodlightFaceMat = trackMat(
+    new THREE.MeshStandardMaterial({
+      color: 0xffffff,
+      map: textures.floodlightBank,
+      emissive: new THREE.Color(0xfff5d8),
+      emissiveMap: textures.floodlightBank,
+      emissiveIntensity: 0.48,
+      roughness: 0.25,
+      metalness: 0.1,
+    }),
+  );
+  const scoreboardScreenMat = trackMat(
+    new THREE.MeshStandardMaterial({
+      color: 0xffffff,
+      map: textures.scoreboardDisplay,
+      emissive: new THREE.Color(0xffffff),
+      emissiveMap: textures.scoreboardDisplay,
+      emissiveIntensity: 0.24,
+      roughness: 0.3,
+      metalness: 0.05,
+    }),
+  );
+  const timingScreenMat = trackMat(
+    new THREE.MeshStandardMaterial({
+      color: 0xffffff,
+      map: textures.timingDisplay,
+      emissive: new THREE.Color(0xffffff),
+      emissiveMap: textures.timingDisplay,
+      emissiveIntensity: 0.24,
+      roughness: 0.3,
+      metalness: 0.05,
+    }),
+  );
+  const stadiumBannerMat = trackMat(
+    new THREE.MeshStandardMaterial({
+      color: 0xffffff,
+      map: textures.stadiumBanner,
+      roughness: 0.46,
+      metalness: 0.05,
+      side: THREE.DoubleSide,
+    }),
+  );
+  const seatMat = trackMat(
+    new THREE.MeshStandardMaterial({
+      color: 0xffffff,
+      roughness: 0.46,
+      metalness: 0.08,
+    }),
+  );
+  const shadowDiscMat = trackMat(
+    new THREE.MeshBasicMaterial({
+      map: textures.contactShadow,
+      transparent: true,
+      depthWrite: false,
+      opacity: 0.34,
+    }),
   );
 
-  // 1. Open concourse plaza deck outside grass field + outer stadium podium skirt
+  // =========================================================================
+  // 1. OUTER LANDSCAPED PARK LAWN, STADIUM CONCOURSE APRON & APPROACH PATHS
+  // =========================================================================
+  const parkY = -0.85;
+  const parkGeo = trackGeo(new THREE.PlaneGeometry(PARK_SIZE, PARK_SIZE));
+  parkGeo.rotateX(-Math.PI / 2);
+  const parkMesh = new THREE.Mesh(parkGeo, parkLawnMat);
+  parkMesh.position.y = parkY;
+  parkMesh.receiveShadow = true;
+  group.add(parkMesh);
+
+  const parkPlinthGeo = trackGeo(new THREE.BoxGeometry(PARK_SIZE - 0.3, 2.8, PARK_SIZE - 0.3));
+  const parkPlinthMesh = new THREE.Mesh(parkPlinthGeo, parkEarthMat);
+  parkPlinthMesh.position.y = parkY - 1.75; // Top sits 0.35 below parkLawn to avoid long-distance Z-fighting
+  group.add(parkPlinthMesh);
+
+  // Clean paved stadium concourse platform around the 240x240 inner grass square
   const concourseY = -0.35;
-  const skirtBottomY = -(FIELD_THICKNESS + 0.55);
-  const { deckGeo, skirtGeo } = buildConcourseDeckAndSkirt(concourseY, skirtBottomY);
-  geometries.push(deckGeo, skirtGeo);
+  const concourseSpan = 356; // [-178, +178], leaves neat green landscaped border outside
+  const concourseGeo = trackGeo(new THREE.BoxGeometry(concourseSpan, 0.52, concourseSpan));
+  const concourseMesh = new THREE.Mesh(concourseGeo, concourseMat);
+  concourseMesh.position.y = concourseY - 0.26;
+  concourseMesh.receiveShadow = true;
+  group.add(concourseMesh);
 
-  const deckMesh = new THREE.Mesh(deckGeo, concourseMat);
-  deckMesh.receiveShadow = true;
-  group.add(deckMesh);
+  // Outer perimeter landscaped ring walkway around the stadium apron
+  const ringWalkOuter = 186;
+  const ringWalkInner = 178;
+  const pathNSGeo = trackGeo(new THREE.BoxGeometry(ringWalkOuter * 2, 0.08, ringWalkOuter - ringWalkInner));
+  const pathEWGeo = trackGeo(new THREE.BoxGeometry(ringWalkOuter - ringWalkInner, 0.08, ringWalkInner * 2));
+  for (const s of [-1, 1]) {
+    const pNS = new THREE.Mesh(pathNSGeo, pathStoneMat);
+    pNS.position.set(0, parkY + 0.04, s * ((ringWalkOuter + ringWalkInner) * 0.5));
+    pNS.receiveShadow = true;
+    const pEW = new THREE.Mesh(pathEWGeo, pathStoneMat);
+    pEW.position.set(s * ((ringWalkOuter + ringWalkInner) * 0.5), parkY + 0.04, 0);
+    pEW.receiveShadow = true;
+    group.add(pNS, pEW);
+  }
 
-  const skirtMesh = new THREE.Mesh(skirtGeo, podiumSkirtMat);
-  skirtMesh.receiveShadow = true;
-  group.add(skirtMesh);
+  // Four radial entrance walkways leading from outer park edge to the 4 cardinal stadium gates
+  const approachLen = PARK_HALF - 177;
+  const approachWidth = 22;
+  const approachGeoZ = trackGeo(new THREE.BoxGeometry(approachWidth, 0.1, approachLen));
+  const approachGeoX = trackGeo(new THREE.BoxGeometry(approachLen, 0.1, approachWidth));
+  for (const s of [-1, 1]) {
+    const walkZ = new THREE.Mesh(approachGeoZ, pathStoneMat);
+    walkZ.position.set(0, parkY + 0.05, s * (177 + approachLen * 0.5));
+    walkZ.receiveShadow = true;
+    const walkX = new THREE.Mesh(approachGeoX, pathStoneMat);
+    walkX.position.set(s * (177 + approachLen * 0.5), parkY + 0.05, 0);
+    walkX.receiveShadow = true;
+    group.add(walkZ, walkX);
+  }
 
-  // Architectural concourse colonnade promenade strip beneath the roof canopy
-  const walkwayBandGeo = buildClosedCurvedProfileGeo([
-    [152, concourseY - 0.01],
-    [152, concourseY + 0.12],
-    [183, concourseY + 0.12],
-    [183, concourseY - 0.01],
-  ]);
-  geometries.push(walkwayBandGeo);
-  const walkwayBandMesh = new THREE.Mesh(walkwayBandGeo, walkwayBandMat);
-  walkwayBandMesh.receiveShadow = true;
-  group.add(walkwayBandMesh);
+  // Subtle perimeter curb outlining the inner 240x240 grass field cleanly on concourse
+  const curbWidth = 1.4;
+  const curbLen = FIELD_HALF * 2 + curbWidth * 2;
+  const curbGeoH = trackGeo(new THREE.BoxGeometry(curbLen, 0.38, curbWidth));
+  const curbGeoV = trackGeo(new THREE.BoxGeometry(curbWidth, 0.38, FIELD_HALF * 2));
+  for (const s of [-1, 1]) {
+    const ch = new THREE.Mesh(curbGeoH, concreteLightMat);
+    ch.position.set(0, concourseY + 0.19, s * (FIELD_HALF + curbWidth * 0.5));
+    ch.receiveShadow = true;
+    const cv = new THREE.Mesh(curbGeoV, concreteLightMat);
+    cv.position.set(s * (FIELD_HALF + curbWidth * 0.5), concourseY + 0.19, 0);
+    cv.receiveShadow = true;
+    group.add(ch, cv);
+  }
 
-  // 2. Curved lower outer concourse parapet walls (open portals centered at N, S, E, W cardinals)
-  const cornerArcs: Array<[number, number]> = [
-    [4, 20],
-    [28, 44],
-    [52, 68],
-    [76, 92],
+  // =========================================================================
+  // 2. COLLECT SEATS FOR ONE SINGLE INSTANCED MESH + BUILD TIERED GRANDSTANDS
+  // =========================================================================
+  const allSeats: SeatInstanceSpec[] = [];
+  const sectionColors = [
+    new THREE.Color(0xd63a2e), // Crimson red
+    new THREE.Color(0x2d4d74), // Deep navy blue
+    new THREE.Color(0xd63a2e),
+    new THREE.Color(0xe3a024), // Center gold/amber
+    new THREE.Color(0x2d4d74),
+    new THREE.Color(0xd63a2e),
   ];
-  for (const [startIdx, endIdx] of cornerArcs) {
-    const lowWallGeo = buildClosedCurvedProfileGeo(
-      [
-        [STADIUM_FACADE_RADIUS - 1.5, concourseY],
-        [STADIUM_FACADE_RADIUS - 1.5, 2.5],
-        [STADIUM_FACADE_RADIUS + 1.5, 2.5],
-        [STADIUM_FACADE_RADIUS + 1.5, concourseY],
-      ],
-      startIdx,
-      endIdx,
-      false,
-    );
-    const lowCapGeo = buildClosedCurvedProfileGeo(
-      [
-        [STADIUM_FACADE_RADIUS - 1.75, 2.5],
-        [STADIUM_FACADE_RADIUS - 1.75, 2.95],
-        [STADIUM_FACADE_RADIUS + 1.75, 2.95],
-        [STADIUM_FACADE_RADIUS + 1.75, 2.5],
-      ],
-      startIdx,
-      endIdx,
-      false,
-    );
-    geometries.push(lowWallGeo, lowCapGeo);
+  const minorSectionColors = [
+    new THREE.Color(0x2d4d74),
+    new THREE.Color(0xd63a2e),
+    new THREE.Color(0xe3a024),
+    new THREE.Color(0xd63a2e),
+    new THREE.Color(0x2d4d74),
+  ];
 
-    const lowWallMesh = new THREE.Mesh(lowWallGeo, facadeWhiteMat);
-    lowWallMesh.castShadow = true;
-    lowWallMesh.receiveShadow = true;
-    const lowCapMesh = new THREE.Mesh(lowCapGeo, structuralSteelMat);
-    lowCapMesh.castShadow = true;
-    lowCapMesh.receiveShadow = true;
-    group.add(lowWallMesh, lowCapMesh);
+  // Helper to construct a stepped seating tier block cleanly inside a local stand group
+  function buildSteppedTier(
+    parent: THREE.Group,
+    centerX: number,
+    centerZ: number,
+    facingYaw: number,
+    standWidth: number,
+    sectionCount: number,
+    aisleWidth: number,
+    rowCount: number,
+    rowDepth: number,
+    rowRise: number,
+    startLocalZ: number, // Frontmost row local Z (toward track)
+    baseY: number,
+    colors: THREE.Color[],
+  ) {
+    const tierGroup = new THREE.Group();
+    tierGroup.position.set(centerX, 0, centerZ);
+    tierGroup.rotation.y = facingYaw;
+    parent.add(tierGroup);
+
+    const totalAisles = sectionCount - 1;
+    const usableWidth = standWidth - totalAisles * aisleWidth;
+    const sectionWidth = usableWidth / sectionCount;
+    const seatsPerSection = Math.max(4, Math.floor((sectionWidth - 0.8) / 1.45));
+
+    // Concrete riser step boxes + stair aisles
+    const riserGeo = trackGeo(new THREE.BoxGeometry(standWidth, rowRise, rowDepth));
+    const riserMesh = new THREE.InstancedMesh(riserGeo, concreteLightMat, rowCount);
+    riserMesh.castShadow = true;
+    riserMesh.receiveShadow = true;
+
+    const aisleGeo = trackGeo(new THREE.BoxGeometry(aisleWidth, rowRise * 0.55, rowDepth * 0.92));
+    const aisleMesh = new THREE.InstancedMesh(
+      aisleGeo,
+      stairAisleMat,
+      rowCount * Math.max(1, totalAisles),
+    );
+    aisleMesh.receiveShadow = true;
+
+    const dummy = new THREE.Object3D();
+    let aisleIdx = 0;
+
+    for (let r = 0; r < rowCount; r++) {
+      const lz = startLocalZ - r * rowDepth;
+      const ly = baseY + r * rowRise;
+
+      dummy.position.set(0, ly + rowRise * 0.5, lz);
+      dummy.rotation.set(0, 0, 0);
+      dummy.scale.set(1, 1, 1);
+      dummy.updateMatrix();
+      riserMesh.setMatrixAt(r, dummy.matrix);
+
+      // Colored seats per section
+      for (let sec = 0; sec < sectionCount; sec++) {
+        const secStartX =
+          -standWidth * 0.5 + sec * (sectionWidth + aisleWidth) + sectionWidth * 0.5;
+        const secColor = colors[sec % colors.length];
+        const spacing = (sectionWidth - 1.1) / Math.max(1, seatsPerSection - 1);
+
+        for (let s = 0; s < seatsPerSection; s++) {
+          const lx = secStartX - (sectionWidth - 1.1) * 0.5 + s * spacing;
+          const world = toWorldXZ(centerX, centerZ, facingYaw, lx, lz);
+          allSeats.push({
+            x: world.x,
+            y: ly + rowRise,
+            z: world.z,
+            yaw: facingYaw,
+            color: secColor,
+          });
+        }
+
+        // Concrete stair aisle between sections
+        if (sec < totalAisles) {
+          const aisleX = -standWidth * 0.5 + (sec + 1) * sectionWidth + (sec + 0.5) * aisleWidth;
+          dummy.position.set(aisleX, ly + rowRise * 0.9, lz + rowDepth * 0.04);
+          dummy.updateMatrix();
+          aisleMesh.setMatrixAt(aisleIdx++, dummy.matrix);
+        }
+      }
+    }
+
+    riserMesh.instanceMatrix.needsUpdate = true;
+    aisleMesh.count = aisleIdx;
+    aisleMesh.instanceMatrix.needsUpdate = true;
+    tierGroup.add(riserMesh, aisleMesh);
+
+    // Subtle side cheek walls bounding the seating bowl cleanly
+    const totalDepth = rowCount * rowDepth;
+    const totalHeight = rowCount * rowRise;
+    const sideWallGeo = trackGeo(new THREE.BoxGeometry(0.9, totalHeight + 0.8, totalDepth));
+    for (const s of [-1, 1]) {
+      const sideWall = new THREE.Mesh(sideWallGeo, concreteMidMat);
+      sideWall.position.set(
+        s * (standWidth * 0.5 + 0.45),
+        baseY + totalHeight * 0.5,
+        startLocalZ - totalDepth * 0.5 + rowDepth * 0.5,
+      );
+      sideWall.castShadow = true;
+      sideWall.receiveShadow = true;
+      tierGroup.add(sideWall);
+    }
+
+    return tierGroup;
   }
 
-  // 3. Curved upper stadium facade ribbon (continuous 360° above open ground concourses)
-  const upperFacadeGeo = buildClosedCurvedProfileGeo([
-    [STADIUM_FACADE_RADIUS - 1.3, 10.2],
-    [STADIUM_FACADE_RADIUS - 1.3, 15.1],
-    [STADIUM_FACADE_RADIUS + 1.8, 15.1],
-    [STADIUM_FACADE_RADIUS + 1.8, 10.2],
-  ]);
-  const upperTrimGeo = buildClosedCurvedProfileGeo([
-    [STADIUM_FACADE_RADIUS - 1.5, 9.4],
-    [STADIUM_FACADE_RADIUS - 1.5, 10.2],
-    [STADIUM_FACADE_RADIUS + 2.0, 10.2],
-    [STADIUM_FACADE_RADIUS + 2.0, 9.4],
-  ]);
-  geometries.push(upperFacadeGeo, upperTrimGeo);
+  // -------------------------------------------------------------------------
+  // A. LARGE MULTI-TIER NORTH MAIN GRANDSTAND (-Z side, facing +Z)
+  // -------------------------------------------------------------------------
+  const northGroup = new THREE.Group();
+  northGroup.name = 'NORTH_MAIN_GRANDSTAND';
+  group.add(northGroup);
 
-  const upperFacadeMesh = new THREE.Mesh(upperFacadeGeo, facadeWhiteMat);
-  upperFacadeMesh.castShadow = true;
-  upperFacadeMesh.receiveShadow = true;
-  const upperTrimMesh = new THREE.Mesh(upperTrimGeo, structuralSteelMat);
-  upperTrimMesh.castShadow = true;
-  group.add(upperTrimMesh, upperFacadeMesh);
+  const northWidth = 196;
+  const northCenterZ = 0;
 
-  // 4. Swept cantilevered roof canopy ring + inner/outer dark fascia + racing-red accent stripe
-  const canopyShellGeo = buildClosedCurvedProfileGeo([
-    [STADIUM_CANOPY_INNER, 16.5],
-    [STADIUM_CANOPY_INNER, 17.25],
-    [STADIUM_CANOPY_OUTER, 15.15],
-    [STADIUM_CANOPY_OUTER, 14.4],
-  ]);
-  const canopyInnerFasciaGeo = buildClosedCurvedProfileGeo([
-    [STADIUM_CANOPY_INNER - 0.65, 16.35],
-    [STADIUM_CANOPY_INNER - 0.65, 17.35],
-    [STADIUM_CANOPY_INNER + 0.25, 17.35],
-    [STADIUM_CANOPY_INNER + 0.25, 16.35],
-  ]);
-  const canopyOuterFasciaGeo = buildClosedCurvedProfileGeo([
-    [STADIUM_CANOPY_OUTER - 0.25, 14.35],
-    [STADIUM_CANOPY_OUTER - 0.25, 15.25],
-    [STADIUM_CANOPY_OUTER + 0.45, 15.25],
-    [STADIUM_CANOPY_OUTER + 0.45, 14.35],
-  ]);
-  const canopyAccentBandGeo = buildClosedCurvedProfileGeo([
-    [STADIUM_CANOPY_INNER - 0.75, 16.7],
-    [STADIUM_CANOPY_INNER - 0.75, 17.08],
-    [STADIUM_CANOPY_INNER - 0.58, 17.08],
-    [STADIUM_CANOPY_INNER - 0.58, 16.7],
-  ]);
-  geometries.push(
-    canopyShellGeo,
-    canopyInnerFasciaGeo,
-    canopyOuterFasciaGeo,
-    canopyAccentBandGeo,
+  // Lower tier: 8 rows from z = -129.5 back to z = -147.1 (y = 0.6 to 6.2)
+  buildSteppedTier(
+    northGroup,
+    0,
+    northCenterZ,
+    0,
+    northWidth,
+    6,
+    2.6,
+    8,
+    2.2,
+    0.72,
+    -129.5,
+    concourseY + 0.85,
+    sectionColors,
   );
 
-  const canopyShellMesh = new THREE.Mesh(canopyShellGeo, canopyRoofMat);
-  canopyShellMesh.castShadow = true;
-  canopyShellMesh.receiveShadow = true;
-  const canopyFasciaMesh = new THREE.Mesh(canopyInnerFasciaGeo, structuralSteelMat);
-  canopyFasciaMesh.castShadow = true;
-  const canopyOuterFasciaMesh = new THREE.Mesh(canopyOuterFasciaGeo, structuralSteelMat);
-  canopyOuterFasciaMesh.castShadow = true;
-  const canopyAccentMesh = new THREE.Mesh(canopyAccentBandGeo, accentTrimMat);
-  group.add(canopyShellMesh, canopyFasciaMesh, canopyOuterFasciaMesh, canopyAccentMesh);
+  // Front fascia wall below first row
+  const northFrontWallGeo = trackGeo(new THREE.BoxGeometry(northWidth + 1.8, 1.35, 1.0));
+  const northFrontWall = new THREE.Mesh(northFrontWallGeo, concreteMidMat);
+  northFrontWall.position.set(0, concourseY + 0.68, -128.4);
+  northFrontWall.castShadow = true;
+  northFrontWall.receiveShadow = true;
+  northGroup.add(northFrontWall);
 
-  // 5. Instanced structural support columns, plinth collars, radial canopy trusses/top ribs, and facade fins
-  const bayCount = RING_SEGMENTS / 2; // 48 structural bays around the stadium
+  // Mid-level open concourse deck (z = -146.5 to -155.5, y = 6.25)
+  const midDeckGeo = trackGeo(new THREE.BoxGeometry(northWidth + 2, 0.8, 9.2));
+  const midDeckMesh = new THREE.Mesh(midDeckGeo, concreteMidMat);
+  midDeckMesh.position.set(0, 6.25, -150.6);
+  midDeckMesh.castShadow = true;
+  midDeckMesh.receiveShadow = true;
+  northGroup.add(midDeckMesh);
 
-  const outerColHeight = 15.0 - concourseY;
-  const outerColGeo = new THREE.CylinderGeometry(0.78, 0.96, outerColHeight, 12);
-  const innerColHeight = 16.45 - concourseY;
-  const innerColGeo = new THREE.CylinderGeometry(0.58, 0.72, innerColHeight, 12);
-  const colPlinthGeo = new THREE.CylinderGeometry(1.12, 1.28, 0.85, 12);
-  const trussLen = STADIUM_CANOPY_OUTER - STADIUM_CANOPY_INNER + 1.2;
-  const trussBeamGeo = new THREE.BoxGeometry(trussLen, 0.58, 0.62);
-  const roofRibGeo = new THREE.BoxGeometry(trussLen - 0.6, 0.35, 0.45);
-  const facadeFinGeo = new THREE.BoxGeometry(1.35, 6.0, 0.7);
+  // Mid-level concourse front handrail + subtle red trim stripe
+  const midRailGeo = trackGeo(new THREE.BoxGeometry(northWidth + 1.4, 0.9, 0.25));
+  const midRailMesh = new THREE.Mesh(midRailGeo, darkSteelMat);
+  midRailMesh.position.set(0, 7.1, -146.3);
+  northGroup.add(midRailMesh);
 
-  geometries.push(
-    outerColGeo,
-    innerColGeo,
-    colPlinthGeo,
-    trussBeamGeo,
-    roofRibGeo,
-    facadeFinGeo,
+  // 3 Vomitory entrance portals opening onto the mid-level concourse
+  const vomFrameGeo = trackGeo(new THREE.BoxGeometry(7.8, 3.8, 2.4));
+  const vomOpeningGeo = trackGeo(new THREE.BoxGeometry(5.8, 3.2, 2.6));
+  for (const vx of [-56, 0, 56]) {
+    const vFrame = new THREE.Mesh(vomFrameGeo, facadeWhiteMat);
+    vFrame.position.set(vx, 8.5, -153.6);
+    vFrame.castShadow = true;
+    const vOpen = new THREE.Mesh(vomOpeningGeo, darkPortalMat);
+    vOpen.position.set(vx, 8.2, -153.5);
+    northGroup.add(vFrame, vOpen);
+  }
+
+  // Upper tier: 7 rows from z = -155.5 back to z = -170.9 (y = 7.4 to 14.4)
+  buildSteppedTier(
+    northGroup,
+    0,
+    northCenterZ,
+    0,
+    northWidth,
+    6,
+    2.6,
+    7,
+    2.2,
+    1.02,
+    -155.5,
+    7.35,
+    sectionColors,
   );
 
-  const outerColInst = new THREE.InstancedMesh(outerColGeo, columnMat, bayCount);
-  const innerColInst = new THREE.InstancedMesh(innerColGeo, columnMat, bayCount);
-  const plinthInst = new THREE.InstancedMesh(colPlinthGeo, structuralSteelMat, bayCount * 2);
-  const trussInst = new THREE.InstancedMesh(trussBeamGeo, structuralSteelMat, bayCount);
-  const roofRibInst = new THREE.InstancedMesh(roofRibGeo, canopyRibMat, bayCount);
-  const finInst = new THREE.InstancedMesh(facadeFinGeo, structuralSteelMat, RING_SEGMENTS);
+  // Under-stand structural substructure, rear concourse bays & 3 North Entrance Gates
+  const northRearWallGeo = trackGeo(new THREE.BoxGeometry(northWidth + 2, 19.6, 1.4));
+  const northRearWall = new THREE.Mesh(northRearWallGeo, facadeWhiteMat);
+  northRearWall.position.set(0, concourseY + 9.8, -172.8);
+  northRearWall.castShadow = true;
+  northRearWall.receiveShadow = true;
+  northGroup.add(northRearWall);
 
-  outerColInst.castShadow = true;
-  outerColInst.receiveShadow = true;
-  innerColInst.castShadow = true;
-  innerColInst.receiveShadow = true;
-  trussInst.castShadow = true;
-  finInst.castShadow = true;
+  // Recessed glazed upper rear concourse band on outer facade
+  const northGlassBandGeo = trackGeo(new THREE.BoxGeometry(northWidth - 10, 4.2, 1.7));
+  const northGlassBand = new THREE.Mesh(northGlassBandGeo, pavilionGlassMat);
+  northGlassBand.position.set(0, 14.2, -172.8);
+  northGroup.add(northGlassBand);
 
+  // 13 Heavy architectural columns & upper facade louvers + cantilevered roof truss ribs
+  const northBayCount = 13;
+  const northColGeo = trackGeo(new THREE.BoxGeometry(1.7, 21.2, 2.4));
+  const northColInst = new THREE.InstancedMesh(northColGeo, concreteLightMat, northBayCount);
+  northColInst.castShadow = true;
+  northColInst.receiveShadow = true;
+
+  const northTrussLen = 42;
+  const northTrussGeo = trackGeo(new THREE.BoxGeometry(1.15, 1.35, northTrussLen));
+  const northTrussInst = new THREE.InstancedMesh(northTrussGeo, darkSteelMat, northBayCount);
+  northTrussInst.castShadow = true;
+
+  const northRoofSlope = Math.atan2(
+    STADIUM_NORTH_CANOPY_HEIGHT - 20.6,
+    northTrussLen,
+  );
   const dummy = new THREE.Object3D();
-  const innerColRadius = STADIUM_CANOPY_INNER + 4.8;
-  const outerColRadius = STADIUM_FACADE_RADIUS - 2.4;
-  const canopySlopeAngle = Math.atan2(16.5 - 14.4, STADIUM_CANOPY_OUTER - STADIUM_CANOPY_INNER);
 
-  for (let b = 0; b < bayCount; b++) {
-    const idx = b * 2;
-    const theta = (idx / RING_SEGMENTS) * Math.PI * 2;
-    const pNext = evaluateStadiumPoint(theta + 0.02, outerColRadius);
-    const pPrev = evaluateStadiumPoint(theta - 0.02, outerColRadius);
-    const tanX = pNext.x - pPrev.x;
-    const tanZ = pNext.z - pPrev.z;
-    const radialOutYaw = Math.atan2(tanX, tanZ);
-
-    // Outer structural column
-    const pOuter = evaluateStadiumPoint(theta, outerColRadius);
-    dummy.position.set(pOuter.x, concourseY + outerColHeight * 0.5, pOuter.z);
-    dummy.rotation.set(0, radialOutYaw, 0);
+  for (let i = 0; i < northBayCount; i++) {
+    const x = -northWidth * 0.5 + (i / (northBayCount - 1)) * northWidth;
+    dummy.position.set(x, concourseY + 10.6, -173.4);
+    dummy.rotation.set(0, 0, 0);
     dummy.scale.set(1, 1, 1);
     dummy.updateMatrix();
-    outerColInst.setMatrixAt(b, dummy.matrix);
+    northColInst.setMatrixAt(i, dummy.matrix);
 
-    dummy.position.set(pOuter.x, concourseY + 0.42, pOuter.z);
+    dummy.position.set(x, 22.1, -153.8);
+    dummy.rotation.set(-northRoofSlope, 0, 0);
     dummy.updateMatrix();
-    plinthInst.setMatrixAt(b * 2, dummy.matrix);
+    northTrussInst.setMatrixAt(i, dummy.matrix);
+  }
+  northColInst.instanceMatrix.needsUpdate = true;
+  northTrussInst.instanceMatrix.needsUpdate = true;
+  northGroup.add(northColInst, northTrussInst);
 
-    // Inner concourse canopy column
-    const pInner = evaluateStadiumPoint(theta, innerColRadius);
-    dummy.position.set(pInner.x, concourseY + innerColHeight * 0.5, pInner.z);
-    dummy.updateMatrix();
-    innerColInst.setMatrixAt(b, dummy.matrix);
+  // Main North Cantilevered Roof Canopy Shell + front fascia & racing-red accent stripe
+  const northCanopyGeo = trackGeo(new THREE.BoxGeometry(northWidth + 6, 0.75, northTrussLen));
+  const northCanopyMesh = new THREE.Mesh(northCanopyGeo, canopyRoofMat);
+  northCanopyMesh.position.set(0, 22.6, -153.8);
+  northCanopyMesh.rotation.x = -northRoofSlope;
+  northCanopyMesh.castShadow = true;
+  northCanopyMesh.receiveShadow = true;
+  northGroup.add(northCanopyMesh);
 
-    dummy.position.set(pInner.x, concourseY + 0.42, pInner.z);
-    dummy.scale.set(0.84, 1, 0.84);
-    dummy.updateMatrix();
-    plinthInst.setMatrixAt(b * 2 + 1, dummy.matrix);
+  const northCanopySoffitGeo = trackGeo(new THREE.BoxGeometry(northWidth + 5.6, 0.28, northTrussLen - 0.6));
+  const northCanopySoffit = new THREE.Mesh(northCanopySoffitGeo, canopySoffitMat);
+  northCanopySoffit.position.set(0, 22.12, -153.8);
+  northCanopySoffit.rotation.x = -northRoofSlope;
+  northGroup.add(northCanopySoffit);
 
-    // Radial cantilever roof truss beam underneath + top roof rib seam
-    const rMid = (STADIUM_CANOPY_INNER + STADIUM_CANOPY_OUTER) * 0.5;
-    const pMid = evaluateStadiumPoint(theta, rMid);
-    dummy.position.set(pMid.x, 15.35, pMid.z);
-    dummy.rotation.set(0, radialOutYaw, -canopySlopeAngle);
-    dummy.scale.set(1, 1, 1);
-    dummy.updateMatrix();
-    trussInst.setMatrixAt(b, dummy.matrix);
+  const northFrontFasciaGeo = trackGeo(new THREE.BoxGeometry(northWidth + 6.4, 1.35, 0.7));
+  const northFrontFascia = new THREE.Mesh(northFrontFasciaGeo, darkSteelMat);
+  northFrontFascia.position.set(0, STADIUM_NORTH_CANOPY_HEIGHT + 0.15, -133.0);
+  northFrontFascia.castShadow = true;
+  northGroup.add(northFrontFascia);
 
-    dummy.position.set(pMid.x, 16.28, pMid.z);
-    dummy.updateMatrix();
-    roofRibInst.setMatrixAt(b, dummy.matrix);
+  const northFasciaAccentGeo = trackGeo(new THREE.BoxGeometry(northWidth + 6.5, 0.42, 0.78));
+  const northFasciaAccent = new THREE.Mesh(northFasciaAccentGeo, accentRedMat);
+  northFasciaAccent.position.set(0, STADIUM_NORTH_CANOPY_HEIGHT - 0.2, -132.98);
+  northGroup.add(northFasciaAccent);
+
+  // North Main Entrance Gate Portals (center + flanking gates facing outward -Z)
+  const gateArchTopGeo = trackGeo(new THREE.BoxGeometry(20, 2.2, 4.6));
+  const gatePierGeo = trackGeo(new THREE.BoxGeometry(2.4, 8.2, 4.2));
+  const gateDarkVoidGeo = trackGeo(new THREE.BoxGeometry(15.2, 6.2, 2.0));
+  for (const gx of [-58, 0, 58]) {
+    const isCenter = gx === 0;
+    const scaleX = isCenter ? 1.25 : 0.88;
+    const archTop = new THREE.Mesh(gateArchTopGeo, darkSteelMat);
+    archTop.scale.set(scaleX, 1, 1);
+    archTop.position.set(gx, 7.8, -174.6);
+    archTop.castShadow = true;
+
+    const gateBannerStrip = new THREE.Mesh(
+      trackGeo(new THREE.BoxGeometry(19.6 * scaleX, 0.65, 4.75)),
+      accentRedMat,
+    );
+    gateBannerStrip.position.set(gx, 8.4, -174.6);
+
+    const gVoid = new THREE.Mesh(gateDarkVoidGeo, darkPortalMat);
+    gVoid.scale.set(scaleX, 1, 1);
+    gVoid.position.set(gx, 3.2, -173.4);
+
+    northGroup.add(archTop, gateBannerStrip, gVoid);
+    for (const ps of [-1, 1]) {
+      const gPier = new THREE.Mesh(gatePierGeo, facadeWhiteMat);
+      gPier.position.set(gx + ps * 8.6 * scaleX, 3.8, -174.6);
+      gPier.castShadow = true;
+      northGroup.add(gPier);
+    }
   }
 
-  for (let i = 0; i < RING_SEGMENTS; i++) {
-    const theta = (i / RING_SEGMENTS) * Math.PI * 2;
-    const pNext = evaluateStadiumPoint(theta + 0.02, STADIUM_FACADE_RADIUS);
-    const pPrev = evaluateStadiumPoint(theta - 0.02, STADIUM_FACADE_RADIUS);
-    const finYaw = Math.atan2(pNext.x - pPrev.x, pNext.z - pPrev.z);
-    const pFin = evaluateStadiumPoint(theta, STADIUM_FACADE_RADIUS + 1.85);
+  // -------------------------------------------------------------------------
+  // B. SMALLER WEST GRANDSTAND (-X side, facing +X)
+  // -------------------------------------------------------------------------
+  const westGroup = new THREE.Group();
+  westGroup.name = 'WEST_STAND';
+  group.add(westGroup);
 
-    dummy.position.set(pFin.x, 12.3, pFin.z);
-    dummy.rotation.set(0, finYaw, 0);
-    dummy.scale.set(1, 1, 1);
-    dummy.updateMatrix();
-    finInst.setMatrixAt(i, dummy.matrix);
-  }
-
-  outerColInst.instanceMatrix.needsUpdate = true;
-  innerColInst.instanceMatrix.needsUpdate = true;
-  plinthInst.instanceMatrix.needsUpdate = true;
-  trussInst.instanceMatrix.needsUpdate = true;
-  roofRibInst.instanceMatrix.needsUpdate = true;
-  finInst.instanceMatrix.needsUpdate = true;
-
-  group.add(outerColInst, innerColInst, plinthInst, trussInst, roofRibInst, finInst);
-
-  // 6. Four corner floodlight towers outside the curved stadium corners
-  const towerBaseGeo = new THREE.BoxGeometry(6.4, 3.2, 6.4);
-  const towerMastHeight = STADIUM_TOWER_HEIGHT - 7.0;
-  const towerMastGeo = new THREE.CylinderGeometry(0.75, 1.35, towerMastHeight, 12);
-  const towerNeckGeo = new THREE.BoxGeometry(1.45, 1.3, 7.2);
-  const towerCrossBarGeo = new THREE.BoxGeometry(14.5, 0.95, 1.05);
-  const floodHousingGeo = new THREE.BoxGeometry(14.0, 5.4, 1.15);
-  const floodFaceGeo = new THREE.PlaneGeometry(13.2, 4.75);
-
-  geometries.push(
-    towerBaseGeo,
-    towerMastGeo,
-    towerNeckGeo,
-    towerCrossBarGeo,
-    floodHousingGeo,
-    floodFaceGeo,
+  const westWidth = 172;
+  const westYaw = Math.PI * 0.5;
+  buildSteppedTier(
+    westGroup,
+    0,
+    0,
+    westYaw,
+    westWidth,
+    5,
+    2.4,
+    8,
+    2.2,
+    0.72,
+    -129.5,
+    concourseY + 0.75,
+    minorSectionColors,
   );
 
-  const cornerAngles = [Math.PI * 0.25, Math.PI * 0.75, Math.PI * 1.25, Math.PI * 1.75];
-  for (let c = 0; c < cornerAngles.length; c++) {
-    const theta = cornerAngles[c];
-    const pos = evaluateStadiumPoint(theta, STADIUM_TOWER_RADIUS);
+  // West rear concourse walkway, colonnade facade & partial roof canopy
+  const westRearWallGeo = trackGeo(new THREE.BoxGeometry(1.4, 12.2, westWidth + 2));
+  const westRearWall = new THREE.Mesh(westRearWallGeo, facadeWhiteMat);
+  westRearWall.position.set(-154.5, concourseY + 6.1, 0);
+  westRearWall.castShadow = true;
+  westRearWall.receiveShadow = true;
+  westGroup.add(westRearWall);
 
+  const westColGeo = trackGeo(new THREE.BoxGeometry(2.0, 12.8, 1.4));
+  const westColCount = 10;
+  const westColInst = new THREE.InstancedMesh(westColGeo, concreteLightMat, westColCount);
+  westColInst.castShadow = true;
+  for (let i = 0; i < westColCount; i++) {
+    const z = -westWidth * 0.5 + (i / (westColCount - 1)) * westWidth;
+    dummy.position.set(-155.0, concourseY + 6.4, z);
+    dummy.rotation.set(0, 0, 0);
+    dummy.scale.set(1, 1, 1);
+    dummy.updateMatrix();
+    westColInst.setMatrixAt(i, dummy.matrix);
+  }
+  westColInst.instanceMatrix.needsUpdate = true;
+  westGroup.add(westColInst);
+
+  const westCanopyGeo = trackGeo(new THREE.BoxGeometry(24, 0.6, westWidth + 4));
+  const westCanopy = new THREE.Mesh(westCanopyGeo, canopyRoofMat);
+  westCanopy.position.set(-145.5, 13.4, 0);
+  westCanopy.rotation.z = -0.09;
+  westCanopy.castShadow = true;
+  westCanopy.receiveShadow = true;
+  westGroup.add(westCanopy);
+
+  const westFasciaGeo = trackGeo(new THREE.BoxGeometry(0.55, 0.9, westWidth + 4.4));
+  const westFascia = new THREE.Mesh(westFasciaGeo, darkSteelMat);
+  westFascia.position.set(-133.6, 14.3, 0);
+  const westAccent = new THREE.Mesh(
+    trackGeo(new THREE.BoxGeometry(0.62, 0.32, westWidth + 4.5)),
+    accentRedMat,
+  );
+  westAccent.position.set(-133.56, 14.05, 0);
+  westGroup.add(westFascia, westAccent);
+
+  // West Entrance Gate Portal
+  const westGateTop = new THREE.Mesh(
+    trackGeo(new THREE.BoxGeometry(4.2, 2.0, 22)),
+    darkSteelMat,
+  );
+  westGateTop.position.set(-156.4, 7.0, 0);
+  westGateTop.castShadow = true;
+  const westGateVoid = new THREE.Mesh(
+    trackGeo(new THREE.BoxGeometry(2.0, 5.8, 16)),
+    darkPortalMat,
+  );
+  westGateVoid.position.set(-155.2, 2.9, 0);
+  westGroup.add(westGateTop, westGateVoid);
+
+  // -------------------------------------------------------------------------
+  // C. SMALLER LOW-PROFILE SOUTH STAND (+Z side, facing -Z, clears spectator view)
+  // -------------------------------------------------------------------------
+  const southGroup = new THREE.Group();
+  southGroup.name = 'SOUTH_STAND';
+  group.add(southGroup);
+
+  const southWidth = 172;
+  const southYaw = Math.PI;
+  buildSteppedTier(
+    southGroup,
+    0,
+    0,
+    southYaw,
+    southWidth,
+    5,
+    2.4,
+    6,
+    2.1,
+    0.66,
+    -132.5,
+    concourseY + 0.65,
+    minorSectionColors,
+  );
+
+  // South rear concourse facade & entrance gate portal (kept low so full track & field show cleanly)
+  const southRearWallGeo = trackGeo(new THREE.BoxGeometry(southWidth + 2, 6.2, 1.4));
+  const southRearWall = new THREE.Mesh(southRearWallGeo, facadeWhiteMat);
+  southRearWall.position.set(0, concourseY + 3.1, 149.5);
+  southRearWall.castShadow = true;
+  southRearWall.receiveShadow = true;
+  southGroup.add(southRearWall);
+
+  const southRearTrim = new THREE.Mesh(
+    trackGeo(new THREE.BoxGeometry(southWidth + 2.4, 0.6, 1.8)),
+    darkSteelMat,
+  );
+  southRearTrim.position.set(0, concourseY + 6.4, 149.5);
+  const southRearStripe = new THREE.Mesh(
+    trackGeo(new THREE.BoxGeometry(southWidth + 2.5, 0.28, 1.86)),
+    accentRedMat,
+  );
+  southRearStripe.position.set(0, concourseY + 6.0, 149.5);
+  southGroup.add(southRearTrim, southRearStripe);
+
+  // South Gate Portal
+  const southGateTop = new THREE.Mesh(
+    trackGeo(new THREE.BoxGeometry(24, 1.8, 4.2)),
+    darkSteelMat,
+  );
+  southGateTop.position.set(0, 6.6, 151.4);
+  southGateTop.castShadow = true;
+  const southGateVoid = new THREE.Mesh(
+    trackGeo(new THREE.BoxGeometry(17, 5.6, 2.0)),
+    darkPortalMat,
+  );
+  southGateVoid.position.set(0, 2.8, 150.2);
+  southGroup.add(southGateTop, southGateVoid);
+
+  // -------------------------------------------------------------------------
+  // D. DISTINCT ARCHITECTURAL EAST PAVILION (+X side overlooking START/FINISH straight)
+  // -------------------------------------------------------------------------
+  const pavilionGroup = new THREE.Group();
+  pavilionGroup.name = 'EAST_PAVILION';
+  group.add(pavilionGroup);
+
+  const pavLen = 128;
+  // Ground colonnade podium & upper covered viewing terrace (y = 5.4)
+  const pavDeckGeo = trackGeo(new THREE.BoxGeometry(28, 0.9, pavLen));
+  const pavDeck = new THREE.Mesh(pavDeckGeo, concreteLightMat);
+  pavDeck.position.set(147, 5.4, 0);
+  pavDeck.castShadow = true;
+  pavDeck.receiveShadow = true;
+  pavilionGroup.add(pavDeck);
+
+  // Ground support columns under projecting viewing terrace
+  const pavColGeo = trackGeo(new THREE.CylinderGeometry(0.55, 0.68, 5.6, 10));
+  const pavColInst = new THREE.InstancedMesh(pavColGeo, concreteLightMat, 18);
+  pavColInst.castShadow = true;
+  let pColIdx = 0;
+  for (let i = 0; i < 9; i++) {
+    const z = -56 + i * 14;
+    for (const px of [134.8, 158.8]) {
+      dummy.position.set(px, concourseY + 2.8, z);
+      dummy.rotation.set(0, 0, 0);
+      dummy.scale.set(1, 1, 1);
+      dummy.updateMatrix();
+      pavColInst.setMatrixAt(pColIdx++, dummy.matrix);
+    }
+  }
+  pavColInst.instanceMatrix.needsUpdate = true;
+  pavilionGroup.add(pavColInst);
+
+  // Front glass-and-steel balustrade along the covered viewing deck
+  const pavRailGlass = new THREE.Mesh(
+    trackGeo(new THREE.BoxGeometry(0.24, 1.35, pavLen - 2)),
+    pavilionGlassMat,
+  );
+  pavRailGlass.position.set(133.4, 6.55, 0);
+  const pavRailTop = new THREE.Mesh(
+    trackGeo(new THREE.BoxGeometry(0.42, 0.2, pavLen - 1.5)),
+    darkSteelMat,
+  );
+  pavRailTop.position.set(133.4, 7.25, 0);
+  pavilionGroup.add(pavRailGlass, pavRailTop);
+
+  // Detailed glazed & louvered Pavilion enclosure set back behind covered terrace
+  const pavHallBody = new THREE.Mesh(
+    trackGeo(new THREE.BoxGeometry(17.5, 6.4, pavLen - 22)),
+    pavilionGlassMat,
+  );
+  pavHallBody.position.set(151.5, 9.0, 0);
+  pavilionGroup.add(pavHallBody);
+
+  // Architectural solid end wings with clean stone trim
+  const pavWingGeo = trackGeo(new THREE.BoxGeometry(20, 7.2, 12));
+  for (const s of [-1, 1]) {
+    const wing = new THREE.Mesh(pavWingGeo, facadeWhiteMat);
+    wing.position.set(150.5, 9.3, s * 57);
+    wing.castShadow = true;
+    wing.receiveShadow = true;
+    pavilionGroup.add(wing);
+  }
+
+  // Warm wood/bronze vertical architectural louver fins across pavilion facade
+  const louverCount = 26;
+  const louverGeo = trackGeo(new THREE.BoxGeometry(0.95, 6.7, 0.42));
+  const louverInst = new THREE.InstancedMesh(louverGeo, woodBronzeMat, louverCount);
+  louverInst.castShadow = true;
+  for (let i = 0; i < louverCount; i++) {
+    const z = -49 + (i / (louverCount - 1)) * 98;
+    dummy.position.set(142.3, 9.1, z);
+    dummy.rotation.set(0, 0, 0);
+    dummy.scale.set(1, 1, 1);
+    dummy.updateMatrix();
+    louverInst.setMatrixAt(i, dummy.matrix);
+  }
+  louverInst.instanceMatrix.needsUpdate = true;
+  pavilionGroup.add(louverInst);
+
+  // Slender front canopy columns supporting the covered viewing deck roof (stop flush below canopy soffit)
+  const upperPavColGeo = trackGeo(new THREE.CylinderGeometry(0.38, 0.45, 6.8, 10));
+  const upperPavColInst = new THREE.InstancedMesh(upperPavColGeo, darkSteelMat, 9);
+  upperPavColInst.castShadow = true;
+  for (let i = 0; i < 9; i++) {
+    dummy.position.set(134.5, 9.15, -56 + i * 14);
+    dummy.rotation.set(0, 0, 0);
+    dummy.scale.set(1, 1, 1);
+    dummy.updateMatrix();
+    upperPavColInst.setMatrixAt(i, dummy.matrix);
+  }
+  upperPavColInst.instanceMatrix.needsUpdate = true;
+  pavilionGroup.add(upperPavColInst);
+
+  // Double-wing sculpted Pavilion Roof Canopy
+  const pavLowerRoof = new THREE.Mesh(
+    trackGeo(new THREE.BoxGeometry(31, 0.65, pavLen + 6)),
+    canopyRoofMat,
+  );
+  pavLowerRoof.position.set(146.5, 13.6, 0);
+  pavLowerRoof.rotation.z = 0.06;
+  pavLowerRoof.castShadow = true;
+  pavLowerRoof.receiveShadow = true;
+
+  const pavUpperClerestory = new THREE.Mesh(
+    trackGeo(new THREE.BoxGeometry(14, 0.85, pavLen - 24)),
+    darkSteelMat,
+  );
+  pavUpperClerestory.position.set(150.5, 14.7, 0);
+  pavUpperClerestory.castShadow = true;
+
+  const pavFrontTrim = new THREE.Mesh(
+    trackGeo(new THREE.BoxGeometry(0.65, 0.9, pavLen + 6.4)),
+    darkSteelMat,
+  );
+  pavFrontTrim.position.set(131.1, 14.55, 0);
+  const pavAccentTrim = new THREE.Mesh(
+    trackGeo(new THREE.BoxGeometry(0.72, 0.34, pavLen + 6.5)),
+    accentRedMat,
+  );
+  pavAccentTrim.position.set(131.05, 14.25, 0);
+
+  pavilionGroup.add(pavLowerRoof, pavUpperClerestory, pavFrontTrim, pavAccentTrim);
+
+  // East Entrance Gate Portal on outer pavilion side
+  const eastGateTop = new THREE.Mesh(
+    trackGeo(new THREE.BoxGeometry(4.2, 2.0, 22)),
+    darkSteelMat,
+  );
+  eastGateTop.position.set(162.5, 7.0, 0);
+  eastGateTop.castShadow = true;
+  const eastGateVoid = new THREE.Mesh(
+    trackGeo(new THREE.BoxGeometry(2.0, 5.2, 16)),
+    darkPortalMat,
+  );
+  eastGateVoid.position.set(161.4, 2.4, 0);
+  pavilionGroup.add(eastGateTop, eastGateVoid);
+
+  // =========================================================================
+  // 3. INSTANCED EMPTY SEATS ACROSS ALL STANDS (SINGLE DRAW CALL)
+  // =========================================================================
+  const seatGeo = trackGeo(createMergedSeatGeometry());
+  const seatInst = new THREE.InstancedMesh(seatGeo, seatMat, allSeats.length);
+  seatInst.castShadow = true;
+  seatInst.receiveShadow = true;
+
+  for (let i = 0; i < allSeats.length; i++) {
+    const s = allSeats[i];
+    dummy.position.set(s.x, s.y, s.z);
+    dummy.rotation.set(0, s.yaw, 0);
+    dummy.scale.set(1, 1, 1);
+    dummy.updateMatrix();
+    seatInst.setMatrixAt(i, dummy.matrix);
+    seatInst.setColorAt(i, s.color);
+  }
+  seatInst.instanceMatrix.needsUpdate = true;
+  if (seatInst.instanceColor) seatInst.instanceColor.needsUpdate = true;
+  group.add(seatInst);
+
+  // =========================================================================
+  // 4. SCOREBOARD, TIMING DISPLAY, CORNER FLOODLIGHT TOWERS & STADIUM BANNERS
+  // =========================================================================
+  // Main Scoreboard at NW stadium corner plaza (-124, -142) angled toward track & spectator camera
+  const scoreboardGroup = new THREE.Group();
+  scoreboardGroup.name = 'STADIUM_SCOREBOARD';
+  scoreboardGroup.position.set(-124, concourseY, -142);
+  scoreboardGroup.rotation.y = Math.PI * 0.25;
+
+  const sbLegGeo = trackGeo(new THREE.BoxGeometry(1.5, 19.5, 1.5));
+  for (const lx of [-8.5, 8.5]) {
+    const leg = new THREE.Mesh(sbLegGeo, darkSteelMat);
+    leg.position.set(lx, 9.75, 0);
+    leg.castShadow = true;
+    scoreboardGroup.add(leg);
+  }
+  const sbHousing = new THREE.Mesh(
+    trackGeo(new THREE.BoxGeometry(27.5, 14.2, 1.6)),
+    darkSteelMat,
+  );
+  sbHousing.position.set(0, 17.5, 0);
+  sbHousing.castShadow = true;
+  scoreboardGroup.add(sbHousing);
+
+  const sbTopAccent = new THREE.Mesh(
+    trackGeo(new THREE.BoxGeometry(27.8, 0.7, 1.7)),
+    accentRedMat,
+  );
+  sbTopAccent.position.set(0, 24.8, 0);
+  scoreboardGroup.add(sbTopAccent);
+
+  const sbFaceGeo = trackGeo(new THREE.PlaneGeometry(25.8, 12.8));
+  const sbFront = new THREE.Mesh(sbFaceGeo, scoreboardScreenMat);
+  sbFront.position.set(0, 17.5, 0.85);
+  const sbBack = new THREE.Mesh(sbFaceGeo, scoreboardScreenMat);
+  sbBack.position.set(0, 17.5, -0.85);
+  sbBack.rotation.y = Math.PI;
+  scoreboardGroup.add(sbFront, sbBack);
+  group.add(scoreboardGroup);
+
+  // Secondary Timing Display Tower near East Pavilion / Finish area (136, 84)
+  const timingGroup = new THREE.Group();
+  timingGroup.name = 'STADIUM_TIMING_DISPLAY';
+  timingGroup.position.set(136, concourseY, 84);
+  timingGroup.rotation.y = -Math.PI * 0.35;
+
+  const tPylonBase = new THREE.Mesh(
+    trackGeo(new THREE.BoxGeometry(3.8, 2.2, 2.6)),
+    concreteMidMat,
+  );
+  tPylonBase.position.set(0, 1.1, 0);
+  tPylonBase.castShadow = true;
+  const tBody = new THREE.Mesh(
+    trackGeo(new THREE.BoxGeometry(6.8, 13.6, 1.4)),
+    darkSteelMat,
+  );
+  tBody.position.set(0, 8.8, 0);
+  tBody.castShadow = true;
+  const tFaceGeo = trackGeo(new THREE.PlaneGeometry(6.0, 12.0));
+  const tFront = new THREE.Mesh(tFaceGeo, timingScreenMat);
+  tFront.position.set(0, 8.8, 0.74);
+  const tBack = new THREE.Mesh(tFaceGeo, timingScreenMat);
+  tBack.position.set(0, 8.8, -0.74);
+  tBack.rotation.y = Math.PI;
+  timingGroup.add(tPylonBase, tBody, tFront, tBack);
+  group.add(timingGroup);
+
+  // Decorative Stadium Banners around entrance plazas & outer corners
+  const bannerPoleGeo = trackGeo(new THREE.CylinderGeometry(0.18, 0.24, 11.2, 8));
+  const bannerFlagGeo = trackGeo(new THREE.PlaneGeometry(2.6, 5.4));
+  const bannerPositions: Array<[number, number, number]> = [
+    [-26, -176, 0],
+    [26, -176, 0],
+    [-162, -26, Math.PI * 0.5],
+    [-162, 26, Math.PI * 0.5],
+    [164, -24, -Math.PI * 0.5],
+    [164, 24, -Math.PI * 0.5],
+    [-26, 153, Math.PI],
+    [26, 153, Math.PI],
+  ];
+  for (const [bx, bz, byaw] of bannerPositions) {
+    const bWrap = new THREE.Group();
+    bWrap.position.set(bx, concourseY, bz);
+    bWrap.rotation.y = byaw;
+    const pole = new THREE.Mesh(bannerPoleGeo, darkSteelMat);
+    pole.position.set(0, 5.6, 0);
+    pole.castShadow = true;
+    const flag = new THREE.Mesh(bannerFlagGeo, stadiumBannerMat);
+    flag.position.set(0, 7.6, -0.24);
+    bWrap.add(pole, flag);
+    group.add(bWrap);
+  }
+
+  // Four tall corner Floodlight Towers outside the stadium corners
+  const towerBaseGeo = trackGeo(new THREE.BoxGeometry(6.8, 3.4, 6.8));
+  const towerMastH = STADIUM_TOWER_HEIGHT - 7.5;
+  const towerMastGeo = trackGeo(new THREE.CylinderGeometry(0.82, 1.48, towerMastH, 12));
+  const towerNeckGeo = trackGeo(new THREE.BoxGeometry(1.6, 1.35, 7.8));
+  const towerBarGeo = trackGeo(new THREE.BoxGeometry(15.6, 1.0, 1.1));
+  const floodHousingGeo = trackGeo(new THREE.BoxGeometry(15.0, 5.8, 1.2));
+  const floodFaceGeo = trackGeo(new THREE.PlaneGeometry(14.2, 5.1));
+
+  const cornerCoords: Array<[number, number]> = [
+    [-STADIUM_TOWER_OFFSET, -STADIUM_TOWER_OFFSET],
+    [STADIUM_TOWER_OFFSET, -STADIUM_TOWER_OFFSET],
+    [-STADIUM_TOWER_OFFSET, STADIUM_TOWER_OFFSET],
+    [STADIUM_TOWER_OFFSET, STADIUM_TOWER_OFFSET],
+  ];
+  for (let c = 0; c < cornerCoords.length; c++) {
+    const [tx, tz] = cornerCoords[c];
     const tower = new THREE.Group();
     tower.name = `FLOODLIGHT_TOWER_${c + 1}`;
-    tower.position.set(pos.x, concourseY, pos.z);
-    tower.rotation.y = Math.atan2(-pos.x, -pos.z);
+    tower.position.set(tx, concourseY, tz);
+    tower.rotation.y = Math.atan2(-tx, -tz);
 
-    const basePlinth = new THREE.Mesh(towerBaseGeo, podiumSkirtMat);
-    basePlinth.position.set(0, 1.6, 0);
+    const basePlinth = new THREE.Mesh(towerBaseGeo, concreteMidMat);
+    basePlinth.position.set(0, 1.7, 0);
     basePlinth.castShadow = true;
     basePlinth.receiveShadow = true;
-    tower.add(basePlinth);
 
-    const mast = new THREE.Mesh(towerMastGeo, structuralSteelMat);
-    mast.position.set(0, 3.2 + towerMastHeight * 0.5, 0);
+    const mast = new THREE.Mesh(towerMastGeo, darkSteelMat);
+    mast.position.set(0, 3.4 + towerMastH * 0.5, 0);
     mast.castShadow = true;
-    tower.add(mast);
 
-    const neck = new THREE.Mesh(towerNeckGeo, structuralSteelMat);
-    neck.position.set(0, STADIUM_TOWER_HEIGHT - 4.0, 2.8);
+    const neck = new THREE.Mesh(towerNeckGeo, darkSteelMat);
+    neck.position.set(0, STADIUM_TOWER_HEIGHT - 4.2, 3.0);
     neck.rotation.x = -0.22;
     neck.castShadow = true;
-    tower.add(neck);
 
     const headMount = new THREE.Group();
-    headMount.position.set(0, STADIUM_TOWER_HEIGHT - 2.8, 6.2);
+    headMount.position.set(0, STADIUM_TOWER_HEIGHT - 3.0, 6.6);
     headMount.rotation.x = 0.52;
 
-    const crossBar = new THREE.Mesh(towerCrossBarGeo, structuralSteelMat);
-    crossBar.position.set(0, 0, -0.6);
-    crossBar.castShadow = true;
-    headMount.add(crossBar);
-
-    const housing = new THREE.Mesh(floodHousingGeo, structuralSteelMat);
+    const bar = new THREE.Mesh(towerBarGeo, darkSteelMat);
+    bar.position.set(0, 0, -0.65);
+    const housing = new THREE.Mesh(floodHousingGeo, darkSteelMat);
     housing.castShadow = true;
-    headMount.add(housing);
+    const face = new THREE.Mesh(floodFaceGeo, floodlightFaceMat);
+    face.position.set(0, 0, 0.62);
 
-    const lampFace = new THREE.Mesh(floodFaceGeo, floodlightFaceMat);
-    lampFace.position.set(0, 0, 0.6);
-    headMount.add(lampFace);
-
-    tower.add(headMount);
+    headMount.add(bar, housing, face);
+    tower.add(basePlinth, mast, neck, headMount);
     group.add(tower);
   }
+
+  // =========================================================================
+  // 5. OUTER PLANTED BEDS, SHRUBS & LOW-DETAIL PERIMETER TREES (OUTSIDE STADIUM)
+  // =========================================================================
+  // Curbed planted beds framing the 4 stadium approach walkways cleanly outside the stadium
+  const bedCoords: Array<[number, number, number, number]> = [
+    [-22, -193, 18, 26],
+    [22, -193, 18, 26],
+    [-22, 193, 18, 26],
+    [22, 193, 18, 26],
+    [-193, -22, 26, 18],
+    [-193, 22, 26, 18],
+    [193, -22, 26, 18],
+    [193, 22, 26, 18],
+  ];
+
+  const shrubPositions: Array<{ x: number; z: number; scale: number; color: number }> = [];
+  for (const [bx, bz, bw, bd] of bedCoords) {
+    const curb = new THREE.Mesh(
+      trackGeo(new THREE.BoxGeometry(bw + 1.2, 0.55, bd + 1.2)),
+      concreteLightMat,
+    );
+    curb.position.set(bx, parkY + 0.27, bz);
+    curb.receiveShadow = true;
+    const soil = new THREE.Mesh(
+      trackGeo(new THREE.BoxGeometry(bw, 0.62, bd)),
+      mulchBedMat,
+    );
+    soil.position.set(bx, parkY + 0.3, bz);
+    soil.receiveShadow = true;
+    group.add(curb, soil);
+
+    // Neat grid of low ornamental shrubs inside each planted bed
+    const cols = bw > bd ? 4 : 3;
+    const rows = bw > bd ? 3 : 4;
+    for (let c = 0; c < cols; c++) {
+      for (let r = 0; r < rows; r++) {
+        const sx = bx - bw * 0.34 + (c / Math.max(1, cols - 1)) * bw * 0.68;
+        const sz = bz - bd * 0.34 + (r / Math.max(1, rows - 1)) * bd * 0.68;
+        shrubPositions.push({
+          x: sx,
+          z: sz,
+          scale: 0.95 + ((c + r) % 3) * 0.22,
+          color: (c + r) % 2 === 0 ? 0x2e8e38 : 0x45ad42,
+        });
+      }
+    }
+  }
+
+  // Outer perimeter low-detail trees placed strictly along the landscaped park border (|x| or |z| >= 191)
+  const treePlacements: Array<{ x: number; z: number; scale: number; tint: number }> = [];
+  const edgeStops = [-196, -162, -128, -94, -56, 56, 94, 128, 162, 196];
+  for (let i = 0; i < edgeStops.length; i++) {
+    const v = edgeStops[i];
+    const tintA = i % 2 === 0 ? 0x2c8a36 : 0x3da140;
+    const tintB = i % 2 === 0 ? 0x3da140 : 0x277d30;
+    treePlacements.push({ x: v, z: -201, scale: 0.95 + (i % 3) * 0.14, tint: tintA });
+    treePlacements.push({ x: v, z: 201, scale: 0.95 + ((i + 1) % 3) * 0.14, tint: tintB });
+    if (Math.abs(v) < 185) {
+      treePlacements.push({ x: -201, z: v, scale: 0.92 + (i % 3) * 0.15, tint: tintB });
+      treePlacements.push({ x: 201, z: v, scale: 0.92 + ((i + 1) % 3) * 0.15, tint: tintA });
+    }
+  }
+
+  // Instanced low-detail trees (trunk + 2-tier faceted foliage + contact shadow discs)
+  const trunkGeo = trackGeo(new THREE.CylinderGeometry(0.42, 0.62, 4.6, 7));
+  const crownLowGeo = trackGeo(new THREE.ConeGeometry(3.2, 6.4, 7));
+  const crownTopGeo = trackGeo(new THREE.ConeGeometry(2.35, 5.2, 7));
+  const treeShadowGeo = trackGeo(new THREE.CircleGeometry(3.6, 12));
+  treeShadowGeo.rotateX(-Math.PI / 2);
+
+  const trunkInst = new THREE.InstancedMesh(trunkGeo, trunkMat, treePlacements.length);
+  const crownLowInst = new THREE.InstancedMesh(crownLowGeo, foliageMat, treePlacements.length);
+  const crownTopInst = new THREE.InstancedMesh(crownTopGeo, foliageMat, treePlacements.length);
+  const treeShadowInst = new THREE.InstancedMesh(treeShadowGeo, shadowDiscMat, treePlacements.length);
+
+  trunkInst.castShadow = true;
+  crownLowInst.castShadow = true;
+  crownTopInst.castShadow = true;
+
+  const tmpColor = new THREE.Color();
+  for (let i = 0; i < treePlacements.length; i++) {
+    const t = treePlacements[i];
+    const s = t.scale;
+
+    dummy.position.set(t.x, parkY + 2.3 * s, t.z);
+    dummy.rotation.set(0, (i * 0.9) % (Math.PI * 2), 0);
+    dummy.scale.set(s, s, s);
+    dummy.updateMatrix();
+    trunkInst.setMatrixAt(i, dummy.matrix);
+
+    dummy.position.set(t.x, parkY + 6.6 * s, t.z);
+    dummy.updateMatrix();
+    crownLowInst.setMatrixAt(i, dummy.matrix);
+    tmpColor.setHex(t.tint);
+    crownLowInst.setColorAt(i, tmpColor);
+
+    dummy.position.set(t.x, parkY + 10.2 * s, t.z);
+    dummy.updateMatrix();
+    crownTopInst.setMatrixAt(i, dummy.matrix);
+    tmpColor.setHex(t.tint).offsetHSL(0, 0, 0.05);
+    crownTopInst.setColorAt(i, tmpColor);
+
+    dummy.position.set(t.x, parkY + 0.03, t.z);
+    dummy.rotation.set(0, 0, 0);
+    dummy.scale.set(s, 1, s);
+    dummy.updateMatrix();
+    treeShadowInst.setMatrixAt(i, dummy.matrix);
+  }
+  trunkInst.instanceMatrix.needsUpdate = true;
+  crownLowInst.instanceMatrix.needsUpdate = true;
+  crownTopInst.instanceMatrix.needsUpdate = true;
+  treeShadowInst.instanceMatrix.needsUpdate = true;
+  if (crownLowInst.instanceColor) crownLowInst.instanceColor.needsUpdate = true;
+  if (crownTopInst.instanceColor) crownTopInst.instanceColor.needsUpdate = true;
+
+  group.add(trunkInst, crownLowInst, crownTopInst, treeShadowInst);
+
+  // Instanced ornamental shrubs inside the curbed planted beds
+  const shrubGeo = trackGeo(new THREE.IcosahedronGeometry(1.15, 0));
+  const shrubInst = new THREE.InstancedMesh(shrubGeo, foliageMat, shrubPositions.length);
+  shrubInst.castShadow = true;
+  shrubInst.receiveShadow = true;
+
+  for (let i = 0; i < shrubPositions.length; i++) {
+    const sh = shrubPositions[i];
+    dummy.position.set(sh.x, parkY + 0.95, sh.z);
+    dummy.rotation.set(0, (i * 1.1) % Math.PI, 0);
+    dummy.scale.set(sh.scale, sh.scale * 0.78, sh.scale);
+    dummy.updateMatrix();
+    shrubInst.setMatrixAt(i, dummy.matrix);
+    tmpColor.setHex(sh.color);
+    shrubInst.setColorAt(i, tmpColor);
+  }
+  shrubInst.instanceMatrix.needsUpdate = true;
+  if (shrubInst.instanceColor) shrubInst.instanceColor.needsUpdate = true;
+  group.add(shrubInst);
 
   return {
     group,

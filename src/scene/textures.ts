@@ -13,6 +13,10 @@ export interface ProceduralTextureSet {
   skyBackdrop: THREE.CanvasTexture;
   concourseColor: THREE.CanvasTexture;
   floodlightBank: THREE.CanvasTexture;
+  scoreboardDisplay: THREE.CanvasTexture;
+  timingDisplay: THREE.CanvasTexture;
+  stadiumBanner: THREE.CanvasTexture;
+  parkLawnColor: THREE.CanvasTexture;
   dispose: () => void;
 }
 
@@ -437,6 +441,230 @@ function createFloodlightBankTexture(maxAnisotropy: number): THREE.CanvasTexture
   return tex;
 }
 
+function createScoreboardTexture(maxAnisotropy: number): THREE.CanvasTexture {
+  const w = 1024;
+  const h = 512;
+  const canvas = document.createElement('canvas');
+  canvas.width = w;
+  canvas.height = h;
+  const ctx = canvas.getContext('2d')!;
+
+  ctx.fillStyle = '#0f1621';
+  ctx.fillRect(0, 0, w, h);
+
+  // Header strip
+  const headerGrad = ctx.createLinearGradient(0, 0, w, 0);
+  headerGrad.addColorStop(0, '#c72c22');
+  headerGrad.addColorStop(0.55, '#e23f31');
+  headerGrad.addColorStop(1, '#1e2c3e');
+  ctx.fillStyle = headerGrad;
+  ctx.fillRect(18, 18, w - 36, 92);
+
+  ctx.fillStyle = '#ffffff';
+  ctx.font = '900 50px "Inter", "Segoe UI", system-ui, sans-serif';
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'middle';
+  ctx.fillText('APEX CIRCUIT ARENA', 44, 66);
+
+  ctx.fillStyle = '#f8d04a';
+  ctx.font = '800 32px "Inter", "Segoe UI", system-ui, sans-serif';
+  ctx.textAlign = 'right';
+  ctx.fillText('STADIUM', w - 44, 66);
+
+  // Left card: stylized track outline graphic
+  ctx.fillStyle = '#182230';
+  ctx.fillRect(28, 132, 340, 348);
+  ctx.strokeStyle = '#33465d';
+  ctx.lineWidth = 4;
+  ctx.strokeRect(28, 132, 340, 348);
+
+  ctx.strokeStyle = '#6fe265';
+  ctx.lineWidth = 14;
+  ctx.lineJoin = 'round';
+  ctx.beginPath();
+  ctx.moveTo(270, 320);
+  ctx.lineTo(270, 410);
+  ctx.quadraticCurveTo(255, 440, 190, 438);
+  ctx.lineTo(95, 435);
+  ctx.bezierCurveTo(60, 430, 62, 360, 115, 360);
+  ctx.lineTo(175, 355);
+  ctx.bezierCurveTo(205, 355, 205, 290, 165, 285);
+  ctx.lineTo(100, 278);
+  ctx.quadraticCurveTo(64, 240, 82, 185);
+  ctx.quadraticCurveTo(105, 162, 185, 162);
+  ctx.lineTo(278, 168);
+  ctx.bezierCurveTo(320, 175, 318, 240, 265, 240);
+  ctx.lineTo(212, 238);
+  ctx.bezierCurveTo(182, 240, 182, 285, 225, 290);
+  ctx.quadraticCurveTo(270, 296, 270, 320);
+  ctx.stroke();
+
+  // Right table: static graphic sector & display rows (pure stadium art)
+  ctx.fillStyle = '#16202e';
+  ctx.fillRect(390, 132, w - 418, 348);
+  ctx.strokeStyle = '#33465d';
+  ctx.lineWidth = 4;
+  ctx.strokeRect(390, 132, w - 418, 348);
+
+  const rowColors = ['#e04637', '#3588e8', '#e5a428', '#48bd54', '#a4b2c4'];
+  const rowLabels = ['SECTOR 1', 'SECTOR 2', 'SECTOR 3', 'TRACK TEMP', 'SESSION'];
+  const rowValues = ['00:18.42', '00:24.16', '00:19.05', '24 C', 'OPEN'];
+
+  for (let i = 0; i < 5; i++) {
+    const ry = 148 + i * 64;
+    ctx.fillStyle = i % 2 === 0 ? '#1d293a' : '#182332';
+    ctx.fillRect(408, ry, w - 454, 52);
+    ctx.fillStyle = rowColors[i];
+    ctx.fillRect(408, ry, 14, 52);
+
+    ctx.fillStyle = '#cbd6e3';
+    ctx.font = '700 26px "Inter", "Segoe UI", system-ui, sans-serif';
+    ctx.textAlign = 'left';
+    ctx.fillText(rowLabels[i], 438, ry + 27);
+
+    ctx.fillStyle = '#ffffff';
+    ctx.font = '800 28px monospace';
+    ctx.textAlign = 'right';
+    ctx.fillText(rowValues[i], w - 64, ry + 27);
+  }
+
+  ctx.strokeStyle = '#60738c';
+  ctx.lineWidth = 8;
+  ctx.strokeRect(4, 4, w - 8, h - 8);
+
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.anisotropy = maxAnisotropy;
+  return tex;
+}
+
+function createTimingDisplayTexture(maxAnisotropy: number): THREE.CanvasTexture {
+  const w = 256;
+  const h = 512;
+  const canvas = document.createElement('canvas');
+  canvas.width = w;
+  canvas.height = h;
+  const ctx = canvas.getContext('2d')!;
+
+  ctx.fillStyle = '#111822';
+  ctx.fillRect(0, 0, w, h);
+
+  ctx.fillStyle = '#e04637';
+  ctx.fillRect(14, 14, w - 28, 68);
+  ctx.fillStyle = '#ffffff';
+  ctx.font = '900 32px "Inter", "Segoe UI", system-ui, sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText('TIMING', w / 2, 48);
+
+  const bars = [
+    ['S1', '18.4', '#6fe265'],
+    ['S2', '24.1', '#f8d04a'],
+    ['S3', '19.0', '#6fe265'],
+    ['BEST', '1:01.5', '#ffffff'],
+    ['GRID', 'OPEN', '#74b8ff'],
+  ];
+  for (let i = 0; i < bars.length; i++) {
+    const y = 104 + i * 78;
+    ctx.fillStyle = '#1c2635';
+    ctx.fillRect(18, y, w - 36, 62);
+    ctx.fillStyle = '#9aa8ba';
+    ctx.font = '700 22px "Inter", system-ui, sans-serif';
+    ctx.textAlign = 'left';
+    ctx.fillText(bars[i][0], 30, y + 32);
+
+    ctx.fillStyle = bars[i][2];
+    ctx.font = '800 26px monospace';
+    ctx.textAlign = 'right';
+    ctx.fillText(bars[i][1], w - 30, y + 32);
+  }
+
+  ctx.strokeStyle = '#475569';
+  ctx.lineWidth = 8;
+  ctx.strokeRect(4, 4, w - 8, h - 8);
+
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.anisotropy = maxAnisotropy;
+  return tex;
+}
+
+function createStadiumBannerTexture(maxAnisotropy: number): THREE.CanvasTexture {
+  const w = 256;
+  const h = 512;
+  const canvas = document.createElement('canvas');
+  canvas.width = w;
+  canvas.height = h;
+  const ctx = canvas.getContext('2d')!;
+
+  const grad = ctx.createLinearGradient(0, 0, 0, h);
+  grad.addColorStop(0, '#1f3656');
+  grad.addColorStop(1, '#15243b');
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, w, h);
+
+  ctx.fillStyle = '#e04637';
+  ctx.fillRect(0, 44, w, 46);
+  ctx.fillStyle = '#f4b938';
+  ctx.fillRect(0, h - 90, w, 26);
+
+  ctx.save();
+  ctx.translate(w / 2, h / 2 + 12);
+  ctx.rotate(-Math.PI / 2);
+  ctx.fillStyle = '#ffffff';
+  ctx.font = '900 54px "Inter", "Segoe UI", system-ui, sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText('APEX GP', 0, 0);
+  ctx.restore();
+
+  ctx.strokeStyle = '#ffffff';
+  ctx.lineWidth = 10;
+  ctx.strokeRect(10, 10, w - 20, h - 20);
+
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.anisotropy = maxAnisotropy;
+  return tex;
+}
+
+function createParkLawnTexture(maxAnisotropy: number): THREE.CanvasTexture {
+  const size = 512;
+  const canvas = document.createElement('canvas');
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext('2d')!;
+
+  ctx.fillStyle = '#3ba636';
+  ctx.fillRect(0, 0, size, size);
+
+  const bandCount = 8;
+  const bandW = size / bandCount;
+  for (let i = 0; i < bandCount; i++) {
+    ctx.fillStyle = i % 2 === 0 ? 'rgba(84, 194, 68, 0.14)' : 'rgba(32, 126, 28, 0.12)';
+    ctx.fillRect(i * bandW, 0, bandW, size);
+  }
+
+  const rand = seededRand(606);
+  for (let i = 0; i < 400; i++) {
+    const x = rand() * size;
+    const y = rand() * size;
+    const r = 6 + rand() * 18;
+    ctx.fillStyle = rand() > 0.5 ? 'rgba(98, 208, 76, 0.08)' : 'rgba(28, 114, 24, 0.08)';
+    ctx.beginPath();
+    ctx.arc(x, y, r, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.wrapS = THREE.RepeatWrapping;
+  tex.wrapT = THREE.RepeatWrapping;
+  tex.repeat.set(24, 24);
+  tex.anisotropy = maxAnisotropy;
+  return tex;
+}
+
 export function createProceduralTextures(maxAnisotropy: number): ProceduralTextureSet {
   const grassColor = createGrassAlbedoTexture(maxAnisotropy);
   const grassRoughness = createGrassRoughnessTexture(maxAnisotropy);
@@ -450,6 +678,10 @@ export function createProceduralTextures(maxAnisotropy: number): ProceduralTextu
   const skyBackdrop = createSkyBackdropTexture();
   const concourseColor = createConcourseTexture(maxAnisotropy);
   const floodlightBank = createFloodlightBankTexture(maxAnisotropy);
+  const scoreboardDisplay = createScoreboardTexture(maxAnisotropy);
+  const timingDisplay = createTimingDisplayTexture(maxAnisotropy);
+  const stadiumBanner = createStadiumBannerTexture(maxAnisotropy);
+  const parkLawnColor = createParkLawnTexture(maxAnisotropy);
 
   return {
     grassColor,
@@ -464,6 +696,10 @@ export function createProceduralTextures(maxAnisotropy: number): ProceduralTextu
     skyBackdrop,
     concourseColor,
     floodlightBank,
+    scoreboardDisplay,
+    timingDisplay,
+    stadiumBanner,
+    parkLawnColor,
     dispose: () => {
       grassColor.dispose();
       grassRoughness.dispose();
@@ -477,6 +713,10 @@ export function createProceduralTextures(maxAnisotropy: number): ProceduralTextu
       skyBackdrop.dispose();
       concourseColor.dispose();
       floodlightBank.dispose();
+      scoreboardDisplay.dispose();
+      timingDisplay.dispose();
+      stadiumBanner.dispose();
+      parkLawnColor.dispose();
     },
   };
 }

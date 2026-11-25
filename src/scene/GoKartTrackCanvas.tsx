@@ -91,7 +91,7 @@ export function GoKartTrackCanvas({
     container.appendChild(renderer.domElement);
 
     const scene = new THREE.Scene();
-    scene.fog = new THREE.Fog(0xe6f4fc, 1950, 3600);
+    scene.fog = new THREE.Fog(0xe6f4fc, 2400, 4600);
 
     // Studio reflection environment for subtle metallic highlights
     const pmremGenerator = new THREE.PMREMGenerator(renderer);
@@ -112,18 +112,18 @@ export function GoKartTrackCanvas({
     scene.add(hemiLight);
 
     const sunLight = new THREE.DirectionalLight(0xfff5e0, 1.45);
-    sunLight.position.set(-140, 240, 165);
+    sunLight.position.set(-165, 280, 195);
     sunLight.castShadow = true;
     const shadowSize = isSoftwareGl ? 1024 : 2048;
     sunLight.shadow.mapSize.set(shadowSize, shadowSize);
-    sunLight.shadow.camera.near = 20;
-    sunLight.shadow.camera.far = 700;
-    sunLight.shadow.camera.left = -215;
-    sunLight.shadow.camera.right = 215;
-    sunLight.shadow.camera.top = 215;
-    sunLight.shadow.camera.bottom = -215;
+    sunLight.shadow.camera.near = 25;
+    sunLight.shadow.camera.far = 850;
+    sunLight.shadow.camera.left = -255;
+    sunLight.shadow.camera.right = 255;
+    sunLight.shadow.camera.top = 255;
+    sunLight.shadow.camera.bottom = -255;
     sunLight.shadow.bias = -0.0008;
-    sunLight.shadow.normalBias = 0.16;
+    sunLight.shadow.normalBias = 0.18;
     sunLight.shadow.radius = 3.0;
     scene.add(sunLight);
 
@@ -169,7 +169,7 @@ export function GoKartTrackCanvas({
     controls.dampingFactor = 0.07;
     controls.maxPolarAngle = Math.PI * 0.45;
     controls.minDistance = 60;
-    controls.maxDistance = 2400;
+    controls.maxDistance = 3000;
     controls.update();
 
     let userMovedOrbit = false;

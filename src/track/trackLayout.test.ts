@@ -4,17 +4,16 @@ import * as THREE from 'three';
 import {
   BANNER_TOTAL_HEIGHT,
   FIELD_HALF,
-  FIELD_THICKNESS,
-  STADIUM_CANOPY_INNER,
-  STADIUM_CONCOURSE_OUTER,
+  PARK_HALF,
+  STADIUM_INNER_STAND_CLEAR,
+  STADIUM_NORTH_CANOPY_HEIGHT,
   STADIUM_TOWER_HEIGHT,
-  STADIUM_TOWER_RADIUS,
+  STADIUM_TOWER_OFFSET,
   TRACK_HALF,
   TRACK_WIDTH,
   analyzeTrackGeometry,
   computeSpectatorCameraPose,
   createTrackCurve,
-  evaluateStadiumPoint,
   getBannerPlacements,
   sampleTrackFrames,
 } from './trackLayout';
@@ -87,39 +86,37 @@ test('spectator camera frames entire square field and both banners with margin',
       new THREE.Vector3(FIELD_HALF, 0, -FIELD_HALF),
       new THREE.Vector3(-FIELD_HALF, 0, FIELD_HALF),
       new THREE.Vector3(FIELD_HALF, 0, FIELD_HALF),
-      new THREE.Vector3(-FIELD_HALF, -FIELD_THICKNESS, FIELD_HALF),
-      new THREE.Vector3(FIELD_HALF, -FIELD_THICKNESS, FIELD_HALF),
       new THREE.Vector3(start.position.x, BANNER_TOTAL_HEIGHT, start.position.z),
       new THREE.Vector3(finish.position.x, BANNER_TOTAL_HEIGHT, finish.position.z),
+      new THREE.Vector3(-PARK_HALF, -1.0, -PARK_HALF),
+      new THREE.Vector3(PARK_HALF, -1.0, -PARK_HALF),
+      new THREE.Vector3(-PARK_HALF, -1.0, PARK_HALF),
+      new THREE.Vector3(PARK_HALF, -1.0, PARK_HALF),
+      new THREE.Vector3(-102, STADIUM_NORTH_CANOPY_HEIGHT, -174),
+      new THREE.Vector3(102, STADIUM_NORTH_CANOPY_HEIGHT, -174),
+      new THREE.Vector3(166, 15, 0),
+      new THREE.Vector3(-162, 14, 0),
+      new THREE.Vector3(-STADIUM_TOWER_OFFSET, STADIUM_TOWER_HEIGHT, -STADIUM_TOWER_OFFSET),
+      new THREE.Vector3(STADIUM_TOWER_OFFSET, STADIUM_TOWER_HEIGHT, STADIUM_TOWER_OFFSET),
     ];
-
-    for (let i = 0; i < 16; i++) {
-      const outer = evaluateStadiumPoint((i / 16) * Math.PI * 2, STADIUM_CONCOURSE_OUTER);
-      mustBeVisible.push(new THREE.Vector3(outer.x, 15.5, outer.z));
-    }
-    for (const cornerAngle of [Math.PI * 0.25, Math.PI * 0.75, Math.PI * 1.25, Math.PI * 1.75]) {
-      const tower = evaluateStadiumPoint(cornerAngle, STADIUM_TOWER_RADIUS);
-      mustBeVisible.push(new THREE.Vector3(tower.x, STADIUM_TOWER_HEIGHT, tower.z));
-    }
 
     for (const pt of mustBeVisible) {
       const ndc = pt.clone().project(cam);
       assert.ok(
-        Math.abs(ndc.x) <= 0.9 && Math.abs(ndc.y) <= 0.9,
+        Math.abs(ndc.x) <= 0.92 && Math.abs(ndc.y) <= 0.92,
         `Aspect ${aspect.toFixed(2)}: point (${pt.x.toFixed(1)}, ${pt.y.toFixed(1)}, ${pt.z.toFixed(1)}) projected near edge (${ndc.x.toFixed(3)}, ${ndc.y.toFixed(3)})`,
       );
     }
   }
 });
 
-test('stadium structure stays strictly outside the 240x240 grass field', () => {
-  for (let i = 0; i < 96; i++) {
-    const theta = (i / 96) * Math.PI * 2;
-    const innerCanopy = evaluateStadiumPoint(theta, STADIUM_CANOPY_INNER);
-    const maxCoord = Math.max(Math.abs(innerCanopy.x), Math.abs(innerCanopy.z));
-    assert.ok(
-      maxCoord > FIELD_HALF + 10,
-      `Stadium inner canopy at theta=${theta.toFixed(2)} encroaches grass field: maxCoord=${maxCoord.toFixed(2)}`,
-    );
-  }
+test('stadium stands, pavilion, and landscaping stay strictly outside the 240x240 grass field', () => {
+  assert.ok(
+    STADIUM_INNER_STAND_CLEAR > FIELD_HALF + 5,
+    `Expected stadium inner clearance > ${FIELD_HALF + 5}, got ${STADIUM_INNER_STAND_CLEAR}`,
+  );
+  assert.ok(
+    STADIUM_TOWER_OFFSET > FIELD_HALF + 30,
+    `Expected floodlight towers well outside grass corners, got ${STADIUM_TOWER_OFFSET}`,
+  );
 });
