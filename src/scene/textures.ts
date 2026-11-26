@@ -37,14 +37,14 @@ function createGrassAlbedoTexture(maxAnisotropy: number): THREE.CanvasTexture {
   const ctx = canvas.getContext('2d')!;
 
   // Bright, vibrant stylized meadow green base
-  ctx.fillStyle = '#3fb838';
+  ctx.fillStyle = '#667c4e';
   ctx.fillRect(0, 0, size, size);
 
   // Soft mowed-turf bands for subtle scale & game-art polish
   const bandCount = 8;
   const bandW = size / bandCount;
   for (let i = 0; i < bandCount; i++) {
-    ctx.fillStyle = i % 2 === 0 ? 'rgba(92, 212, 72, 0.14)' : 'rgba(36, 138, 32, 0.12)';
+    ctx.fillStyle = i % 2 === 0 ? 'rgba(139, 153, 99, 0.14)' : 'rgba(57, 80, 44, 0.12)';
     ctx.fillRect(i * bandW, 0, bandW, size);
   }
 
@@ -56,8 +56,8 @@ function createGrassAlbedoTexture(maxAnisotropy: number): THREE.CanvasTexture {
     const r = 8 + rand() * 24;
     const light = rand() > 0.5;
     const grad = ctx.createRadialGradient(x, y, 0, x, y, r);
-    grad.addColorStop(0, light ? 'rgba(104, 222, 82, 0.10)' : 'rgba(34, 130, 30, 0.10)');
-    grad.addColorStop(1, 'rgba(63, 184, 56, 0)');
+    grad.addColorStop(0, light ? 'rgba(145, 163, 104, 0.10)' : 'rgba(52, 75, 42, 0.10)');
+    grad.addColorStop(1, 'rgba(102, 124, 78, 0)');
     ctx.fillStyle = grad;
     ctx.beginPath();
     ctx.arc(x, y, r, 0, Math.PI * 2);
@@ -69,7 +69,7 @@ function createGrassAlbedoTexture(maxAnisotropy: number): THREE.CanvasTexture {
     const x = rand() * size;
     const y = rand() * size;
     const len = 3 + rand() * 5;
-    ctx.strokeStyle = rand() > 0.45 ? 'rgba(122, 232, 98, 0.22)' : 'rgba(30, 118, 26, 0.18)';
+    ctx.strokeStyle = rand() > 0.45 ? 'rgba(153, 165, 112, 0.22)' : 'rgba(56, 76, 44, 0.18)';
     ctx.lineWidth = 1.2;
     ctx.beginPath();
     ctx.moveTo(x, y);
@@ -120,17 +120,8 @@ function createAsphaltAlbedoTexture(maxAnisotropy: number): THREE.CanvasTexture 
   canvas.height = size;
   const ctx = canvas.getContext('2d')!;
 
-  // Rich dark slate tarmac with subtle rubbered-in racing groove down center
+  // Neutral asphalt aggregate; UVs are metre-scaled on town roads.
   ctx.fillStyle = '#333943';
-  ctx.fillRect(0, 0, size, size);
-
-  const grooveGrad = ctx.createLinearGradient(0, 0, size, 0);
-  grooveGrad.addColorStop(0, 'rgba(72, 80, 92, 0.22)');
-  grooveGrad.addColorStop(0.24, 'rgba(34, 39, 47, 0.14)');
-  grooveGrad.addColorStop(0.5, 'rgba(20, 24, 30, 0.26)');
-  grooveGrad.addColorStop(0.76, 'rgba(34, 39, 47, 0.14)');
-  grooveGrad.addColorStop(1, 'rgba(72, 80, 92, 0.22)');
-  ctx.fillStyle = grooveGrad;
   ctx.fillRect(0, 0, size, size);
 
   const rand = seededRand(303);
@@ -674,13 +665,13 @@ function createParkLawnTexture(maxAnisotropy: number): THREE.CanvasTexture {
   canvas.height = size;
   const ctx = canvas.getContext('2d')!;
 
-  ctx.fillStyle = '#3ba636';
+  ctx.fillStyle = '#687e50';
   ctx.fillRect(0, 0, size, size);
 
   const bandCount = 8;
   const bandW = size / bandCount;
   for (let i = 0; i < bandCount; i++) {
-    ctx.fillStyle = i % 2 === 0 ? 'rgba(84, 194, 68, 0.14)' : 'rgba(32, 126, 28, 0.12)';
+    ctx.fillStyle = i % 2 === 0 ? 'rgba(134, 150, 97, 0.14)' : 'rgba(57, 77, 43, 0.12)';
     ctx.fillRect(i * bandW, 0, bandW, size);
   }
 
@@ -689,7 +680,7 @@ function createParkLawnTexture(maxAnisotropy: number): THREE.CanvasTexture {
     const x = rand() * size;
     const y = rand() * size;
     const r = 6 + rand() * 18;
-    ctx.fillStyle = rand() > 0.5 ? 'rgba(98, 208, 76, 0.08)' : 'rgba(28, 114, 24, 0.08)';
+    ctx.fillStyle = rand() > 0.5 ? 'rgba(147, 158, 108, 0.08)' : 'rgba(53, 73, 42, 0.08)';
     ctx.beginPath();
     ctx.arc(x, y, r, 0, Math.PI * 2);
     ctx.fill();

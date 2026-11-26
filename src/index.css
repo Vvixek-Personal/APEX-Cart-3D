@@ -33,3 +33,131 @@ body,
     display: flex;
   }
 }
+
+:root { font-family: "Segoe UI", Arial, sans-serif; color: #edf1ed; font-synthesis: none; }
+button { cursor: pointer; }
+button:focus-visible { outline: 2px solid #e1bd83; outline-offset: 3px; }
+.drive-hud { position: fixed; inset: 0; pointer-events: none; z-index: 20; color: #edf1ed; }
+.hud-surface { background: linear-gradient(125deg, rgba(20,28,31,.94), rgba(16,23,27,.88)); border: 1px solid #d9e4e226; border-radius: 6px; box-shadow: 0 8px 32px #0002; }
+.drive-brand { position: absolute; left: 24px; top: 22px; display: flex; gap: 13px; align-items: center; padding: 12px 17px 12px 12px; }
+.brand-mark { width: 35px; height: 36px; border-right: 1px solid #fff3; font-size: 31px; font-weight: 800; line-height: 34px; letter-spacing: -5px; font-style: italic; }
+.brand-mark span { color: #d7b47b; }
+.drive-brand h1 { font-size: 13px; letter-spacing: 2px; font-weight: 800; margin: 0 0 7px; }
+.drive-brand h1 span { font-size: 10px; letter-spacing: 1.5px; font-weight: 500; color: #c4cecc; }
+.drive-brand p { font-size: 8px; letter-spacing: 1.3px; color: #aab9b5; margin: 0; display: flex; align-items: center; gap: 5px; }
+.drive-brand p i, .live-dot:before { width: 5px; height: 5px; background: #a1cbb5; display: inline-block; border-radius: 50%; }
+.drive-brand p b { font-weight: 400; color: #60706d; }
+.panel-heading { display: flex; align-items: center; justify-content: space-between; gap: 10px; font-size: 9px; font-weight: 600; letter-spacing: 1.6px; color: #c5d0cc; }
+.navigation-panel { position: absolute; bottom: 60px; left: 24px; width: 180px; overflow: hidden; }
+.navigation-panel .panel-heading { padding: 13px 12px; }
+.north-label { color: #e1bd83; }
+.district-map { display: block; width: 100%; height: 235px; border-block: 1px solid #ffffff10; }
+.map-label { fill: #bcc6c0; font: 5px "Segoe UI", sans-serif; letter-spacing: .5px; }
+.map-legend { display: flex; gap: 10px; padding: 11px 10px; font-size: 7px; letter-spacing: .5px; color: #a5b4b1; }
+.map-legend span { display: flex; gap: 4px; align-items: center; }
+.map-legend i { width: 4px; height: 4px; border-radius: 50%; background: #b9e9d1; }
+.map-legend span+span i { background: #ddc28d; }
+.route-hint { position: absolute; top: 107px; left: 24px; display: flex; gap: 12px; align-items: center; padding: 12px 16px; max-width: 330px; }
+.route-icon { font-size: 25px; color: #d7b47b; }
+.route-hint strong { display: block; font-weight: 500; font-size: 12px; letter-spacing: .3px; }
+.route-hint p { font-size: 10px; color: #a8b7b3; margin: 5px 0 0; line-height: 1.5; }
+.instrument-panel { position: absolute; bottom: 60px; right: 24px; width: 278px; padding: 17px 20px 13px; border-top: 2px solid #cfb07f; }
+.instrument-panel .panel-heading { text-transform: uppercase; font-size: 9px; letter-spacing: 1px; }
+.live-dot { font-size: 8px; color: #a1cbb5; display: flex; align-items: center; gap: 5px; }
+.speed-readout { display: flex; gap: 12px; align-items: baseline; padding-block: 15px 13px; }
+.speed-readout>strong { font-size: 67px; line-height: 1; font-weight: 300; letter-spacing: -3px; font-variant-numeric: tabular-nums; margin-left: auto; }
+.speed-readout>span { color: #a4b2af; font-size: 11px; }
+.gear-readout { display: flex; flex-direction: column; gap: 6px; align-items: center; }
+.gear-readout strong { font-size: 27px; font-weight: 400; color: #e1bd83; }
+.gear-readout small { font-size: 7px; color: #a4b2af; letter-spacing: 1.5px; }
+.rpm-scale { display: flex; gap: 3px; height: 5px; }
+.rpm-scale i { flex: 1; background: #ffffff15; transform: skewX(-16deg); }
+.rpm-scale .lit { background: #bdd5c9; }
+.rpm-scale .redline { background: #ce745d; }
+.instrument-footer { display: flex; justify-content: space-between; padding-top: 10px; font-size: 7px; color: #a4b2af; letter-spacing: 1px; }
+.session-strip { position: absolute; top: 100px; right: 24px; display: flex; gap: 24px; padding: 14px 18px; }
+.session-strip div { display: flex; flex-direction: column; gap: 6px; }
+.session-strip small { font-size: 8px; letter-spacing: 1.2px; color: #9eafaa; }
+.session-strip strong { font-size: 15px; font-weight: 500; font-variant-numeric: tabular-nums; }
+.session-strip em { font-size: 11px; color: #82948f; font-style: normal; }
+.drive-warning { position: absolute; left: 50%; top: 190px; transform: translateX(-50%); padding: 12px 20px; background: #8c3b2dea; border-left: 3px solid #e4b08c; font-size: 12px; letter-spacing: 1px; }
+.drive-warning span { margin-left: 12px; font-size: 10px; letter-spacing: 0; }
+.drive-countdown { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; text-shadow: 0 4px 25px #0009; }
+.drive-countdown>span { font-size: 10px; letter-spacing: 5px; }
+.drive-countdown strong { font-size: clamp(65px, 10vw, 120px); font-weight: 300; }
+.drive-countdown p { font-size: 12px; }
+.finish-backdrop { position: absolute; inset: 0; background: #0d171b99; display: grid; place-items: center; pointer-events: auto; }
+.finish-panel { width: min(400px, 90vw); padding: 32px; }
+.finish-panel>small { font-size: 10px; letter-spacing: 3px; color: #d7b47b; }
+.finish-panel h2 { font-size: 35px; font-weight: 400; margin: 16px 0 10px; }
+.finish-panel p { font-size: 12px; color: #a4b2af; }
+.finish-panel dl { margin: 26px 0; }
+.finish-panel dl div { display: flex; justify-content: space-between; padding: 12px 0; border-bottom: 1px solid #fff2; font-size: 12px; }
+.finish-panel dd { margin: 0; font-variant-numeric: tabular-nums; }
+.finish-panel button { padding: 14px; background: #d7b47b; color: #1c2728; width: 100%; font-size: 12px; font-weight: 600; border: 0; border-radius: 3px; }
+/* A single restrained visual language for the existing keyboard/touch controls. */
+main>div.z-10 button { border-radius: 5px; box-shadow: none; font-size: 11px; }
+main>div.z-10 [role="group"] { border-radius: 5px; background: #162024e8; }
+main>div.z-10 button[aria-pressed="true"] { background: #bda579; color: #172126; border-color: #d6bd8b; }
+@media (max-width: 1100px) {
+  .drive-brand { top: 70px; left: 16px; }
+  .route-hint { top: 150px; left: 16px; max-width: 265px; }
+  .navigation-panel { left: 16px; width: 150px; }
+  .district-map { height: 190px; }
+  .session-strip { top: 75px; right: 16px; gap: 14px; }
+}
+@media (max-width: 640px) {
+  .drive-brand { top: 63px; left: 12px; padding: 9px; gap: 9px; }
+  .drive-brand h1 { font-size: 11px; }
+  .drive-brand h1 span { font-size: 8px; }
+  .brand-mark { height: 30px; font-size: 26px; }
+  .drive-brand p { font-size: 7px; letter-spacing: .6px; }
+  .route-hint { left: 12px; top: 138px; padding: 9px 12px; max-width: 245px; }
+  .route-hint strong { font-size: 10px; }
+  .route-hint p { font-size: 9px; }
+  .navigation-panel { width: 110px; left: 12px; bottom: 213px; }
+  .navigation-panel .panel-heading { padding: 8px; font-size: 7px; letter-spacing: .5px; }
+  .district-map { height: 145px; }
+  .map-legend { display: none; }
+  .instrument-panel { bottom: 225px; right: 12px; width: 175px; padding: 10px 12px; }
+  .instrument-panel .panel-heading { font-size: 7px; }
+  .speed-readout { gap: 7px; padding-block: 10px; }
+  .speed-readout>strong { font-size: 40px; }
+  .gear-readout strong { font-size: 20px; }
+  .instrument-footer { font-size: 5px; letter-spacing: .5px; }
+  .session-strip { top: 204px; left: 12px; right: auto; padding: 9px 12px; gap: 14px; }
+  .session-strip strong { font-size: 11px; }
+  .session-strip small { font-size: 6px; }
+  .drive-warning { top: 265px; width: max-content; max-width: 95vw; font-size: 10px; }
+}
+@media (max-height: 620px) and (min-width: 641px) {
+  .navigation-panel { bottom: 42px; width: 126px; }
+  .district-map { height: 150px; }
+  .map-legend { display: none; }
+  .instrument-panel { bottom: 45px; }
+  .route-hint { top: 144px; }
+}
+@media (pointer: coarse) and (min-width: 641px) { .navigation-panel, .instrument-panel { bottom: 180px; } }
+@media (max-height: 500px) { .navigation-panel { display: none; } .route-hint { display: none; } .instrument-panel { bottom: 170px; padding: 10px; } .speed-readout>strong { font-size: 35px; } }
+.game-controls>div:first-child button { background-color: #172328ed; color: #dce5df; border-color: #c9d7ce35; }
+.game-controls>div:first-child button[aria-pressed="true"] { background-color: #bda579; color: #172126; }
+.game-controls [data-testid="vehicle-interact-btn"] { background: #1c2b2af2; border: 1px solid #cbb58a; color: #ebdfc7; font-weight: 500; padding: 10px 17px; }
+.game-controls .touch-controls-layer button { background: #182528ed; border: 1px solid #c6d4ce55; color: #e4eae5; }
+.game-controls .touch-controls-layer button[aria-label="Accelerate"] { border-bottom: 3px solid #94b6a1; }
+.game-controls .touch-controls-layer button[aria-label="Brake or Reverse"] { border-bottom: 3px solid #c18873; }
+.game-controls .touch-controls-layer button[aria-label="Handbrake Drift"] { border-bottom: 3px solid #c9af7e; }
+.game-controls .touch-controls-layer button:active { background: #4d645a; }
+@media (max-width: 640px) {
+  .navigation-panel { top: 215px; bottom: auto; width: 91px; }
+  .district-map { height: 123px; }
+  .navigation-panel .panel-heading { font-size: 6px; }
+  .instrument-panel { bottom: 140px; width: 155px; }
+  .instrument-panel .live-dot { display: none; }
+  .speed-readout>strong { font-size: 35px; }
+  .instrument-footer { font-size: 5px; letter-spacing: 0; }
+}
+@media (max-height: 500px) { .navigation-panel { display: none; } }
+.navigation-panel .panel-heading span { white-space: nowrap; }
+@media (max-width: 640px) {
+  .navigation-panel .panel-heading { gap: 4px; padding: 8px 6px; letter-spacing: .35px; font-size: 5.5px; }
+}

@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createTrackCurve, sampleTrackFrames } from '../track/trackLayout';
 import { createInitialKartState, stepKartPhysics } from './kartPhysics';
+import { VEHICLE_CATALOG } from './vehicleCatalog';
 import {
   KART_TOWN_SPAWN,
   TOWN_BLOCKS,
@@ -61,7 +62,7 @@ test('kart drives freely along town road and straight through open South Stadium
 
   // Drive north along Main Avenue straight through South Gate (z = 150) onto track spur (z in [99, 120])
   let passedGateSpeed = 0;
-  for (let i = 0; i < 152; i++) {
+  for (let i = 0; i < 320 && state.z >= 114; i++) {
     state = stepKartPhysics(state, driveInput, 0.05, frames);
     if (state.z < 150 && passedGateSpeed === 0) {
       passedGateSpeed = state.speed;
@@ -151,7 +152,7 @@ test('interior AABB ejection, wall velocity projection, and banner/archway colli
   );
 });
 
-test('handbrake drift charges boost while cornering and awards exit turbo boost on release', () => {
+test('handbrake slides scrub speed and releasing the handbrake never awards free turbo', () => {
   const curve = createTrackCurve();
   const frames = sampleTrackFrames(curve, 240);
 
@@ -175,7 +176,8 @@ test('handbrake drift charges boost while cornering and awards exit turbo boost 
   assert.equal(state.isDrifting, true);
   assert.ok((state.driftCharge ?? 0) >= 0.45, `Expected driftCharge >= 0.45, got ${state.driftCharge}`);
 
-  // Release drift -> triggers exit turbo boost
+  // Releasing the handbrake restores grip, not an arcade turbo boost.
+  const releaseSpeed = state.speed;
   state = stepKartPhysics(
     state,
     { accelerate: true, brakeReverse: false, steerLeft: false, steerRight: false, drift: false },
@@ -183,5 +185,69 @@ test('handbrake drift charges boost while cornering and awards exit turbo boost 
     frames,
   );
   assert.equal(state.isDrifting, false);
-  assert.ok((state.boostTimer ?? 0) > 0.3, `Expected active boostTimer on drift release, got ${state.boostTimer}`);
+  assert.equal(state.boostTimer, 0);
+  assert.ok(state.speed - releaseSpeed <= VEHICLE_CATALOG.big_kart.stats.accelRate * .05);
+});
+
+const gas = { accelerate: true, brakeReverse: false, steerLeft: false, steerRight: false };
+const coast = { ...gas, accelerate: false };
+
+// Fixed paved position = an unbounded straight-road dynamometer. This isolates
+// longitudinal tuning from intersections, building collisions and map bounds.
+function roadRun(specId: string, seconds: number, hz = 60, initialSpeed = 0, input = gas) {
+  let state = { ...createInitialKartState(), speed: initialSpeed };
+  const stats = VEHICLE_CATALOG[specId].stats;
+  let distance = 0;
+  for (let frame = 0; frame < seconds * hz; frame++) {
+    const before = 300;
+    state = stepKartPhysics({ ...state, x: 0, z: before, yaw: Math.PI }, input, 1 / hz, [], stats);
+    distance += before - state.z;
+  }
+  return { state, distance };
+}
+
+test('every vehicle takes more than two seconds to reach 60 km/h, with a progressive launch', () => {
+  for (const spec of Object.values(VEHICLE_CATALOG)) {
+    const launch = roadRun(spec.id, .1);
+    const twoSeconds = roadRun(spec.id, 2);
+    assert.ok(launch.state.speed < .3, `${spec.name}: no instant throttle spike`);
+    assert.ok(twoSeconds.state.speed * 3.6 < 42, `${spec.name}: speed after 2s is ${twoSeconds.state.speed * 3.6}`);
+    assert.ok(twoSeconds.state.speed * 3.6 > 15, `${spec.name}: must not feel stuck`);
+    assert.ok(roadRun(spec.id, 12).state.speed > 60 / 3.6, `${spec.name}: 60 km/h must remain reachable`);
+  }
+});
+
+test('vehicle character is preserved: formula accelerates faster than GT, then kart and cruiser', () => {
+  const speed = (id: string) => roadRun(id, 2).state.speed;
+  assert.ok(speed('formula_open') > speed('sport_gt'));
+  assert.ok(speed('sport_gt') > speed('big_kart'));
+  assert.ok(speed('big_kart') > speed('street_cruiser'));
+});
+
+test('acceleration is stable at 20, 30, 60 and 120 FPS and power tapers near top speed', () => {
+  const reference = roadRun('sport_gt', 6).state.speed;
+  for (const fps of [20, 30, 120]) {
+    assert.ok(Math.abs(roadRun('sport_gt', 6, fps).state.speed - reference) < .15);
+  }
+  const top = VEHICLE_CATALOG.sport_gt.stats.maxForwardSpeed;
+  const nearTop = roadRun('sport_gt', 1, 60, top - 1).state.speed;
+  const launch = roadRun('sport_gt', 1).state.speed;
+  assert.ok(nearTop - (top - 1) < launch);
+  assert.ok(roadRun('sport_gt', 60).state.speed <= top);
+});
+
+test('lifting coasts naturally; braking from 60 km/h stops in a plausible distance', () => {
+  const speed = 60 / 3.6;
+  const rolling = roadRun('sport_gt', 2, 60, speed, coast);
+  const braking = roadRun('sport_gt', 1.8, 60, speed, { ...coast, brakeReverse: true });
+  assert.ok(rolling.state.speed > speed * .8, 'Lifting must not act like full brakes');
+  assert.ok(Math.abs(braking.state.speed) < .5);
+  assert.ok(braking.distance > 12 && braking.distance < 18, `Stopping distance: ${braking.distance} m`);
+});
+
+test('high-speed steering respects tire grip and the displayed speed is actual m/s', () => {
+  const state = stepKartPhysics({ ...createInitialKartState(), x: 0, z: 300, speed: 25, steerAngle: 1 }, { ...gas, steerLeft: true }, 1/60, []);
+  assert.ok(Math.abs(state.yawRate! * state.speed) <= 9.81);
+  const moved = stepKartPhysics({ ...createInitialKartState(), x: 0, z: 300, speed: 10 }, coast, .05, []);
+  assert.ok(Math.abs((300 - moved.z) / .05 - moved.speed) < 1e-8);
 });

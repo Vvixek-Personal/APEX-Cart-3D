@@ -25,7 +25,8 @@ export interface KartState {
   x: number;
   z: number;
   yaw: number;          // Heading in radians (0 = +Z South, PI = -Z North)
-  speed: number;        // Signed forward speed along heading (units/s)
+  speed: number;        // Signed forward speed in metres per second (1 world unit = 1 metre)
+  throttle?: number;    // Smoothed engine demand [0..1]
   steerAngle: number;   // Smoothed visual & steering input [-1, 1]
   wheelSpin: number;    // Accumulated wheel rotation angle (radians)
   onTrack: boolean;     // True when on race track OR town paved road/parking lot
@@ -34,8 +35,8 @@ export interface KartState {
   pitchTilt?: number;    // Smoothed suspension squat/dive angle (rad)
   rollTilt?: number;     // Smoothed suspension cornering body roll (rad)
   isDrifting?: boolean;  // Active handbrake/powerslide state
-  driftCharge?: number;  // Accumulated drift boost charge [0..1]
-  boostTimer?: number;   // Remaining exit traction boost seconds
+  driftCharge?: number;  // Slide intensity [0..1] (legacy telemetry name)
+  boostTimer?: number;   // Legacy telemetry; always zero (no handbrake turbo)
   onKerb?: boolean;      // True when tires ride the painted corner kerbs
 }
 
@@ -46,16 +47,16 @@ export const KART_PHYSICS: VehiclePhysicsStats & {
   worldMaxZ: number;
 } = {
   maxForwardSpeed: 28,
-  maxReverseSpeed: 10,
+  maxReverseSpeed: 4,
   offTrackMaxSpeed: 12.5,
   plazaMaxSpeed: 22,
-  accelRate: 24,
-  reverseAccelRate: 16,
-  brakeRate: 42,
-  coastDrag: 9.5,
+  accelRate: 3.8,
+  reverseAccelRate: 2.2,
+  brakeRate: 9,
+  coastDrag: 0.7,
   offTrackDrag: 26,
   maxTurnRate: 2.38,
-  steerResponseRate: 12.5,
+  steerResponseRate: 6.5,
   kartRadius: 1.38,
   wheelRadius: 0.42,
   worldMinX: -174,
@@ -273,9 +274,9 @@ export function resolveStaticCollisions(
 }
 
 /**
- * Advances vehicle physics by rawDt seconds using responsive semi-realistic arcade dynamics:
+ * Advances vehicle physics by rawDt seconds using progressive road-car dynamics:
  * - Surface-dependent grip & top speed (asphalt, cobblestone plaza, turf, and FIA kerbs)
- * - Lateral tire slip angle, cornering weight transfer, and handbrake powerslide/drift + exit boost
+ * - Lateral tire slip angle, cornering weight transfer, and grip-limited cornering and handbrake slip
  * - Suspension chassis squat, dive, and cornering roll angles
  * - Vector-projected wall sliding (head-on wall hits stop cleanly; glancing impacts slide smoothly)
  */
@@ -297,15 +298,18 @@ export function stepKartPhysics(
   const onAsphalt = onRaceTrack || isPositionOnTownRoad(state.x, state.z);
   const onPlazaPath = !onAsphalt && isPositionInMarketOrParkPath(state.x, state.z);
 
-  let boostTimer = Math.max(0, (state.boostTimer ?? 0) - dt);
-  const boostMult = boostTimer > 0 ? 1.12 : 1.0;
+  // No free energy from releasing the handbrake. Legacy HUD fields remain zero.
+  const boostTimer = 0;
+  const throttleTarget = input.accelerate && !input.brakeReverse ? 1 : 0;
+  const throttle = (state.throttle ?? 0) + (throttleTarget - (state.throttle ?? 0)) *
+    (1 - Math.exp(-(throttleTarget ? 3.2 : 9) * dt));
 
   const baseTopSpeed = onAsphalt
     ? stats.maxForwardSpeed
     : onPlazaPath
       ? stats.plazaMaxSpeed
       : stats.offTrackMaxSpeed;
-  const topSpeed = baseTopSpeed * boostMult;
+  const topSpeed = baseTopSpeed;
 
   const prevSpeed = state.speed;
   let speed = prevSpeed;
@@ -315,8 +319,10 @@ export function stepKartPhysics(
     if (speed < 0) {
       speed = Math.min(0, speed + stats.brakeRate * dt);
     } else if (speed < topSpeed) {
-      const accelMult = boostTimer > 0 ? 1.3 : 1.0;
-      speed = Math.min(topSpeed, speed + stats.accelRate * accelMult * dt);
+      // Available wheel force falls as speed rises (power and aerodynamic load).
+      const speedRatio = Math.max(0, speed) / Math.max(1, topSpeed);
+      const wheelForce = stats.accelRate * throttle * (1 - 0.78 * speedRatio * speedRatio);
+      speed = Math.min(topSpeed, speed + wheelForce * dt);
     } else if (!onAsphalt) {
       speed = Math.max(topSpeed, speed - stats.offTrackDrag * dt);
     } else if (speed > topSpeed) {
@@ -332,9 +338,11 @@ export function stepKartPhysics(
       speed = Math.max(-maxRev, speed - stats.reverseAccelRate * dt);
     }
   } else {
-    const drag = onAsphalt || onPlazaPath
-      ? stats.coastDrag
-      : stats.offTrackDrag * 0.75;
+    const drag = input.accelerate && input.brakeReverse
+      ? stats.brakeRate
+      : onAsphalt || onPlazaPath
+        ? stats.coastDrag + 0.0018 * speed * speed
+        : stats.offTrackDrag * 0.35;
     if (speed > 0) {
       speed = Math.max(0, speed - drag * dt);
     } else if (speed < 0) {
@@ -349,21 +357,17 @@ export function stepKartPhysics(
 
   // Handbrake / powerslide state
   const wantsDrift = Boolean(input.drift);
-  const wasDrifting = Boolean(state.isDrifting);
   const canSustainDrift = speed > 8.5 && (Math.abs(steerAngle) > 0.12 || Math.abs(state.lateralSpeed ?? 0) > 1.8);
   const isDrifting = wantsDrift && canSustainDrift;
 
   let driftCharge = state.driftCharge ?? 0;
   if (isDrifting) {
-    // Scrub a tiny bit of straight-line speed during deep drift while building exit boost
+    // Scrub forward speed while the rear tires slide.
     speed = Math.max(0, speed - 2.6 * Math.abs(steerAngle) * dt);
     if (onAsphalt || onPlazaPath) {
       driftCharge = Math.min(1, driftCharge + dt * 0.95);
     }
   } else {
-    if (wasDrifting && driftCharge >= 0.42 && input.accelerate) {
-      boostTimer = 0.7;
-    }
     driftCharge = Math.max(0, driftCharge - dt * 2.5);
   }
 
@@ -376,7 +380,11 @@ export function stepKartPhysics(
         (1.0 - 0.14 * THREE.MathUtils.clamp((absSpeed - 14) / 12, 0, 1));
   const reverseSign = speed >= 0 ? 1 : -1;
   const driftTurnBoost = isDrifting ? 1.28 : 1.0;
-  const yawRate = steerAngle * stats.maxTurnRate * driftTurnBoost * speedSteerFactor * reverseSign;
+  const requestedYawRate = steerAngle * stats.maxTurnRate * driftTurnBoost * speedSteerFactor * reverseSign;
+  // Tire grip limits cornering acceleration instead of allowing 5g turns at speed.
+  const gripLimit = onAsphalt ? 9.8 : onPlazaPath ? 6.8 : 4.2;
+  const maxYawRate = gripLimit / Math.max(3, absSpeed);
+  const yawRate = THREE.MathUtils.clamp(requestedYawRate, -maxYawRate, maxYawRate);
   const yaw = state.yaw + yawRate * dt;
 
   // Lateral tire slip dynamics (local +X is left of +Z heading: sideVec = (cos(yaw), -sin(yaw)))
@@ -476,6 +484,7 @@ export function stepKartPhysics(
     z: nextZ,
     yaw,
     speed,
+    throttle,
     steerAngle,
     wheelSpin,
     onTrack: nextOnTrack,
