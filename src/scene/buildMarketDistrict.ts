@@ -26,6 +26,7 @@ import {
 
 export interface MarketDistrictBuildResult {
   group: THREE.Group;
+  update: (elapsedSeconds: number) => void;
   dispose: () => void;
 }
 
@@ -136,8 +137,6 @@ export function buildMarketDistrict(textures: ProceduralTextureSet): MarketDistr
   const earthMat = getSolidMat(TOWN_PALETTE.soilWarm, 0.94, 0.0);
   const paintWhiteMat = getSolidMat(0xf4f7fa, 0.7, 0.0);
   const paintYellowMat = getSolidMat(0xf5c542, 0.68, 0.0);
-  const lightTrimMat = getSolidMat(TOWN_PALETTE.wallCreamTrim, 0.55, 0.05);
-  const woodLightMat = getSolidMat(TOWN_PALETTE.woodBirch, 0.78, 0.04);
   const waterMat = trackMat(
     new THREE.MeshStandardMaterial({
       color: TOWN_PALETTE.waterPool,
@@ -441,32 +440,28 @@ export function buildMarketDistrict(textures: ProceduralTextureSet): MarketDistr
   buildStripeInst(whiteStripes, paintWhiteMat);
 
   // =========================================================================
-  // 5. HIGH-DETAIL SCULPTED EUROPEAN TOWNHOUSES & SHOPS
+  // 5. HIGH-DETAIL SCULPTED EUROPEAN TOWNHOUSES & SHOPS (MERGED SINGLE MESH)
   // =========================================================================
   const yawMap = { s: 0, e: Math.PI * 0.5, n: Math.PI, w: -Math.PI * 0.5 } as const;
+  const buildingParts: THREE.BufferGeometry[] = [];
 
   for (let bi = 0; bi < TOWN_BUILDINGS.length; bi++) {
     const b = TOWN_BUILDINGS[bi];
-    const bGeo = trackGeo(
-      buildSculptedTownhouseGeo({
-        index: bi,
-        w: b.w,
-        d: b.d,
-        h: b.h,
-        wallColor: b.wallColor,
-        accentColor: b.accentColor,
-        windowPalette: b.windowPalette,
-        facing: b.facing,
-        hasShopFront: b.hasShopFront,
-        awningColor: b.awningColor,
-        roofStyle: b.roofStyle,
-      }),
-    );
-    const bMesh = new THREE.Mesh(bGeo, sculptedMat);
-    bMesh.position.set(b.x, sidewalkY, b.z);
-    bMesh.castShadow = true;
-    bMesh.receiveShadow = true;
-    group.add(bMesh);
+    const bGeo = buildSculptedTownhouseGeo({
+      index: bi,
+      w: b.w,
+      d: b.d,
+      h: b.h,
+      wallColor: b.wallColor,
+      accentColor: b.accentColor,
+      windowPalette: b.windowPalette,
+      facing: b.facing,
+      hasShopFront: b.hasShopFront,
+      awningColor: b.awningColor,
+      roofStyle: b.roofStyle,
+    });
+    transformGeo(bGeo, { pos: [b.x, sidewalkY, b.z] });
+    buildingParts.push(bGeo);
 
     if (b.hasShopFront && b.signText) {
       const sTex = createSignCanvasTexture(b.signText, '', '#14212e', '#fbbf24', 2);
@@ -485,6 +480,13 @@ export function buildMarketDistrict(textures: ProceduralTextureSet): MarketDistr
       );
       group.add(sMesh);
     }
+  }
+
+  if (buildingParts.length > 0) {
+    const mergedBuildingsMesh = new THREE.Mesh(trackGeo(mergeParts(buildingParts)), sculptedMat);
+    mergedBuildingsMesh.castShadow = true;
+    mergedBuildingsMesh.receiveShadow = true;
+    group.add(mergedBuildingsMesh);
   }
 
   // =========================================================================
@@ -685,7 +687,7 @@ export function buildMarketDistrict(textures: ProceduralTextureSet): MarketDistr
   );
 
   // Curved-slat sculpted Paris-green & Oak Park Benches
-  const benchBaseGeo = trackGeo(buildParkBenchGeo(TOWN_PALETTE.woodOak));
+  const benchBaseGeo = buildParkBenchGeo(TOWN_PALETTE.woodOak);
   const benchCoords: Array<[number, number, number]> = [
     [20.2, 286.8, Math.PI * 0.25],
     [32.8, 286.8, -Math.PI * 0.25],
@@ -866,6 +868,12 @@ export function buildMarketDistrict(textures: ProceduralTextureSet): MarketDistr
 
   return {
     group,
+    update: (elapsedSeconds: number) => {
+      const pulse = 1 + Math.sin(elapsedSeconds * 5.2) * 0.14;
+      fountainSpout.scale.set(1 + Math.cos(elapsedSeconds * 4.4) * 0.08, pulse, 1 + Math.cos(elapsedSeconds * 4.4) * 0.08);
+      fountainSpout.position.y = sidewalkY + 5.12 + (pulse - 1) * 0.22;
+      fountainWater.rotation.y = elapsedSeconds * 0.28;
+    },
     dispose: () => {
       for (const g of geometries) g.dispose();
       for (const m of materials) m.dispose();

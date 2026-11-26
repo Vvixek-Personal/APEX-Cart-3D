@@ -64,8 +64,6 @@ function buildClosedRibbonGeometry(
       const b = base + 1;
       const c = base + 2;
       const d = base + 3;
-      // normal = (-tangent.z, 0, tangent.x) points left of +tangent in right-handed XZ;
-      // winding (a, b, c) and (b, d, c) yields upward +Y normals.
       indices.push(a, b, c, b, d, c);
     }
   }
@@ -76,6 +74,133 @@ function buildClosedRibbonGeometry(
   geo.setAttribute('uv', new THREE.BufferAttribute(uvs, 2));
   geo.setIndex(indices);
   geo.computeBoundingSphere();
+  return geo;
+}
+
+/**
+ * Builds FIA red-and-white corner kerbs along track sections with significant curvature,
+ * keeping straightaways (including START/FINISH straight and South Gate entry) clean.
+ */
+function buildCornerKerbGeometry(
+  frames: TrackFrame[],
+  y: number,
+  uvRepeatLength: number,
+): THREE.BufferGeometry | null {
+  const n = frames.length;
+  if (n < 16) return null;
+
+  const rawTurn = new Float32Array(n);
+  for (let i = 0; i < n; i++) {
+    const prev = frames[(i - 3 + n) % n];
+    const next = frames[(i + 3) % n];
+    // 2D cross product in XZ indicates signed curvature
+    rawTurn[i] = prev.tangent.x * next.tangent.z - prev.tangent.z * next.tangent.x;
+  }
+
+  const posList: number[] = [];
+  const normList: number[] = [];
+  const uvList: number[] = [];
+  const idxList: number[] = [];
+  let vertCount = 0;
+
+  const kerbWidth = 1.25;
+  const threshold = 0.14;
+
+  for (const side of [-1, 1] as const) {
+    const innerOff = side < 0 ? -(TRACK_HALF + 0.35) : TRACK_HALF - kerbWidth + 0.35;
+    const outerOff = side < 0 ? -(TRACK_HALF - kerbWidth + 0.35) : TRACK_HALF + 0.35;
+
+    for (let i = 0; i < n; i++) {
+      const fA = frames[i];
+      // Keep South Gate spur junction around x ~ 0, z ~ 92 free on outer (+Z) edge
+      if (Math.abs(fA.position.x) < 9.5 && fA.position.z > 84) {
+        continue;
+      }
+
+      const curv = Math.abs(rawTurn[i]);
+      if (curv < threshold) continue;
+
+      const fB = frames[(i + 1) % n];
+      const segLen = fA.position.distanceTo(fB.position);
+      const v0 = fA.arcLength / uvRepeatLength;
+      const v1 = (fA.arcLength + segLen) / uvRepeatLength;
+
+      const axL = fA.position.x + fA.normal.x * innerOff;
+      const azL = fA.position.z + fA.normal.z * innerOff;
+      const axR = fA.position.x + fA.normal.x * outerOff;
+      const azR = fA.position.z + fA.normal.z * outerOff;
+
+      const bxL = fB.position.x + fB.normal.x * innerOff;
+      const bzL = fB.position.z + fB.normal.z * innerOff;
+      const bxR = fB.position.x + fB.normal.x * outerOff;
+      const bzR = fB.position.z + fB.normal.z * outerOff;
+
+      posList.push(
+        axL, y, azL,
+        axR, y, azR,
+        bxL, y, bzL,
+        bxR, y, bzR,
+      );
+      normList.push(
+        0, 1, 0,
+        0, 1, 0,
+        0, 1, 0,
+        0, 1, 0,
+      );
+      uvList.push(
+        0, v0,
+        1, v0,
+        0, v1,
+        1, v1,
+      );
+      idxList.push(
+        vertCount, vertCount + 1, vertCount + 2,
+        vertCount + 1, vertCount + 3, vertCount + 2,
+      );
+      vertCount += 4;
+    }
+  }
+
+  if (vertCount === 0) return null;
+
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(posList, 3));
+  geo.setAttribute('normal', new THREE.Float32BufferAttribute(normList, 3));
+  geo.setAttribute('uv', new THREE.Float32BufferAttribute(uvList, 2));
+  geo.setIndex(idxList);
+  geo.computeBoundingSphere();
+  return geo;
+}
+
+/**
+ * Builds crisp painted directional chevron arrows on the asphalt (especially at the
+ * South Gate junction so arriving drivers immediately see the clockwise circuit flow).
+ */
+function createChevronGeometry(): THREE.BufferGeometry {
+  const shape = new THREE.Shape();
+  // Chevron pointing toward local +Z (forward along track tangent)
+  shape.moveTo(0, 1.55);
+  shape.lineTo(1.75, -0.45);
+  shape.lineTo(1.75, -1.35);
+  shape.lineTo(0, 0.55);
+  shape.lineTo(-1.75, -1.35);
+  shape.lineTo(-1.75, -0.45);
+  shape.closePath();
+
+  const geo = new THREE.ShapeGeometry(shape);
+  // Rotate ShapeGeometry (XY, +Y up) onto XZ (+Z forward, +Y normal)
+  geo.rotateX(Math.PI / 2);
+  // Flip winding so +Y is front face: scale Y or reverse index
+  const idx = geo.getIndex();
+  if (idx) {
+    const arr = idx.array as Uint16Array;
+    for (let i = 0; i < arr.length; i += 3) {
+      const tmp = arr[i + 1];
+      arr[i + 1] = arr[i + 2];
+      arr[i + 2] = tmp;
+    }
+  }
+  geo.computeVertexNormals();
   return geo;
 }
 
@@ -175,6 +300,25 @@ export function buildTrackEnvironment(
   asphaltMesh.receiveShadow = true;
   group.add(asphaltMesh);
 
+  // 3b. Red-and-white FIA racing kerbs along corners
+  const kerbGeo = buildCornerKerbGeometry(frames, 0.095, 3.6);
+  if (kerbGeo) {
+    geometries.push(kerbGeo);
+    const kerbMat = new THREE.MeshStandardMaterial({
+      color: 0xffffff,
+      map: textures.kerbStripe,
+      roughness: 0.72,
+      metalness: 0.02,
+      polygonOffset: true,
+      polygonOffsetFactor: -1,
+      polygonOffsetUnits: -1,
+    });
+    materials.push(kerbMat);
+    const kerbMesh = new THREE.Mesh(kerbGeo, kerbMat);
+    kerbMesh.receiveShadow = true;
+    group.add(kerbMesh);
+  }
+
   // 4. Subtle painted edge lines along left and right edges of the track
   const lineWidth = 0.46;
   const leftEdgeOffset = -(TRACK_HALF - TRACK_MARGIN_INSET);
@@ -214,6 +358,36 @@ export function buildTrackEnvironment(
   rightLineMesh.receiveShadow = true;
   group.add(leftLineMesh, rightLineMesh);
 
+  // 4b. Painted track-direction chevrons (clustered at South Gate entry u=0.13..0.16 + circuit straights)
+  if (frames.length > 0) {
+    const chevronGeo = createChevronGeometry();
+    geometries.push(chevronGeo);
+    const chevronMat = new THREE.MeshBasicMaterial({
+      color: 0xf8fafc,
+      transparent: true,
+      opacity: 0.62,
+      depthWrite: false,
+      polygonOffset: true,
+      polygonOffsetFactor: -2,
+      polygonOffsetUnits: -2,
+    });
+    materials.push(chevronMat);
+
+    const chevronUs = [0.132, 0.142, 0.152, 0.34, 0.58, 0.82];
+    const chevronInst = new THREE.InstancedMesh(chevronGeo, chevronMat, chevronUs.length);
+    const dummy = new THREE.Object3D();
+    for (let i = 0; i < chevronUs.length; i++) {
+      const f = frames[Math.floor(chevronUs[i] * frames.length) % frames.length];
+      dummy.position.set(f.position.x, 0.122, f.position.z);
+      dummy.rotation.set(0, Math.atan2(f.tangent.x, f.tangent.z), 0);
+      dummy.scale.setScalar(i < 3 ? 1.15 : 0.95);
+      dummy.updateMatrix();
+      chevronInst.setMatrixAt(i, dummy.matrix);
+    }
+    chevronInst.instanceMatrix.needsUpdate = true;
+    group.add(chevronInst);
+  }
+
   // 5. Subtle painted starting grid at START banner
   const startGridLength = 16.0;
   const startGridGeo = new THREE.PlaneGeometry(TRACK_HALF * 2 - 2.8, startGridLength);
@@ -234,7 +408,6 @@ export function buildTrackEnvironment(
   materials.push(startGridMat);
 
   const startGridMesh = new THREE.Mesh(startGridGeo, startGridMat);
-  // Extend behind the START line along -tangent
   startGridMesh.position
     .copy(banners.start.position)
     .addScaledVector(banners.start.tangent, -(startGridLength * 0.5 - 0.8));

@@ -1,7 +1,6 @@
 import * as THREE from 'three';
 import {
   FIELD_HALF,
-  FIELD_THICKNESS,
   PARK_HALF,
   PARK_SIZE,
   STADIUM_NORTH_CANOPY_HEIGHT,

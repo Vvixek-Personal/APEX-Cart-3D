@@ -13,6 +13,7 @@ import {
   FollowPerspective,
   PERSPECTIVE_OPTIONS,
   PlayerHudInfo,
+  TouchActionInputState,
   TouchControls,
 } from './components/TouchControls';
 import { RaceHUD } from './components/RaceHUD';
@@ -20,7 +21,6 @@ import {
   RaceState,
   createInitialRaceState,
 } from './game/raceRules';
-import type { KartInputState } from './kart/kartPhysics';
 import { GoKartTrackCanvas } from './scene/GoKartTrackCanvas';
 
 const INITIAL_PLAYER_HUD: PlayerHudInfo = {
@@ -32,11 +32,21 @@ const INITIAL_PLAYER_HUD: PlayerHudInfo = {
   nearbyVehicleName: 'Apex Mega Kart',
   nearbyVehicleTagline: 'Oversized Twin-Engine Kart',
   speedUnits: 0,
+  gear: 1,
+  rpmNorm: 0.2,
+  isDrifting: false,
+  driftCharge: 0,
+  boostTimer: 0,
+  isOffTrack: false,
+  posX: -5.4,
+  posZ: 242.0,
+  heading: Math.PI,
 };
 
 export default function App() {
   const [cameraMode, setCameraMode] = useState<CameraMode>('follow');
   const [perspective, setPerspective] = useState<FollowPerspective>('chase');
+  const [isMuted, setIsMuted] = useState(false);
   const [spectatorResetTick, setSpectatorResetTick] = useState(0);
   const [restartRaceTick, setRestartRaceTick] = useState(0);
   const [vehicleInteractTick, setVehicleInteractTick] = useState(0);
@@ -45,16 +55,22 @@ export default function App() {
   );
   const [playerInfo, setPlayerInfo] = useState<PlayerHudInfo>(INITIAL_PLAYER_HUD);
 
-  const touchInputRef = useRef<KartInputState>({
+  const touchInputRef = useRef<TouchActionInputState>({
     accelerate: false,
     brakeReverse: false,
     steerLeft: false,
     steerRight: false,
+    drift: false,
+    sprint: false,
   });
 
   const freeCamTouchInputRef = useRef<FreeCameraInputState>(
     createEmptyFreeCameraInput(),
   );
+
+  const handleToggleMute = useCallback(() => {
+    setIsMuted((prev) => !prev);
+  }, []);
 
   const handleToggleFollow = useCallback(() => {
     setCameraMode((prev) => (prev === 'follow' ? 'spectator' : 'follow'));
@@ -101,7 +117,7 @@ export default function App() {
   }, []);
 
   const handleKartTouchInput = useCallback(
-    (key: keyof KartInputState, pressed: boolean) => {
+    (key: keyof TouchActionInputState, pressed: boolean) => {
       touchInputRef.current[key] = pressed;
     },
     [],
@@ -119,6 +135,7 @@ export default function App() {
       <GoKartTrackCanvas
         cameraMode={cameraMode}
         perspective={perspective}
+        isMuted={isMuted}
         spectatorResetTick={spectatorResetTick}
         restartRaceTick={restartRaceTick}
         vehicleInteractTick={vehicleInteractTick}
@@ -130,6 +147,7 @@ export default function App() {
         onCyclePerspective={handleCyclePerspective}
         onToggleFollow={handleToggleFollow}
         onToggleFreeCam={handleToggleFreeCam}
+        onToggleMute={handleToggleMute}
         onResetSpectator={handleResetSpectator}
       />
       <RaceHUD
@@ -141,6 +159,8 @@ export default function App() {
         cameraMode={cameraMode}
         perspective={perspective}
         playerInfo={playerInfo}
+        isMuted={isMuted}
+        onToggleMute={handleToggleMute}
         onSelectPerspective={handleSelectPerspective}
         onCyclePerspective={handleCyclePerspective}
         onToggleFollow={handleToggleFollow}

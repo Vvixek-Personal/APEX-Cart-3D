@@ -95,7 +95,6 @@ export interface LoftStation {
 }
 
 const _baseColor = new THREE.Color();
-const _tmpColor = new THREE.Color();
 const _aoTint = new THREE.Color(0x465170);
 const _topTint = new THREE.Color(0xfffaf0);
 
