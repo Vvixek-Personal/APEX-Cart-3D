@@ -9,12 +9,21 @@ import {
   createEmptyFreeCameraInput,
 } from './camera/freeCamera';
 import { CameraMode, TouchControls } from './components/TouchControls';
+import { RaceHUD } from './components/RaceHUD';
+import {
+  RaceState,
+  createInitialRaceState,
+} from './game/raceRules';
 import type { KartInputState } from './kart/kartPhysics';
 import { GoKartTrackCanvas } from './scene/GoKartTrackCanvas';
 
 export default function App() {
   const [cameraMode, setCameraMode] = useState<CameraMode>('spectator');
   const [spectatorResetTick, setSpectatorResetTick] = useState(0);
+  const [restartRaceTick, setRestartRaceTick] = useState(0);
+  const [raceState, setRaceState] = useState<RaceState>(() =>
+    createInitialRaceState(3, 6),
+  );
 
   const touchInputRef = useRef<KartInputState>({
     accelerate: false,
@@ -40,6 +49,15 @@ export default function App() {
     setSpectatorResetTick((n) => n + 1);
   }, []);
 
+  const handleRestartRace = useCallback(() => {
+    setRestartRaceTick((n) => n + 1);
+    setRaceState(createInitialRaceState(3, 6));
+  }, []);
+
+  const handleRaceStateChange = useCallback((state: RaceState) => {
+    setRaceState(state);
+  }, []);
+
   const handleKartTouchInput = useCallback(
     (key: keyof KartInputState, pressed: boolean) => {
       touchInputRef.current[key] = pressed;
@@ -59,12 +77,15 @@ export default function App() {
       <GoKartTrackCanvas
         cameraMode={cameraMode}
         spectatorResetTick={spectatorResetTick}
+        restartRaceTick={restartRaceTick}
         touchInputRef={touchInputRef}
         freeCamTouchInputRef={freeCamTouchInputRef}
+        onRaceStateChange={handleRaceStateChange}
         onToggleFollow={handleToggleFollow}
         onToggleFreeCam={handleToggleFreeCam}
         onResetSpectator={handleResetSpectator}
       />
+      <RaceHUD raceState={raceState} onRestart={handleRestartRace} />
       <TouchControls
         cameraMode={cameraMode}
         onToggleFollow={handleToggleFollow}

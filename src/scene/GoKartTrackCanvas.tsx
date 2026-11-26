@@ -20,6 +20,12 @@ import {
   getBannerPlacements,
   sampleTrackFrames,
 } from '../track/trackLayout';
+import {
+  RaceState,
+  createInitialRaceState,
+  generateCheckpoints,
+  updateRaceState,
+} from '../game/raceRules';
 import type { CameraMode } from '../components/TouchControls';
 import { buildTrackBanners } from './buildBanners';
 import { buildStadiumArchitecture } from './buildStadium';
@@ -37,6 +43,77 @@ function detectSoftwareWebGL(): boolean {
   return /SwiftShader|llvmpipe|softpipe|Software|Basic Render/i.test(gpu);
 }
 
+function createAtmosphericEffects(scene: THREE.Scene): () => void {
+  // Soft glowing sun flare sprite near directional light position
+  const canvas = document.createElement('canvas');
+  canvas.width = 128;
+  canvas.height = 128;
+  const ctx = canvas.getContext('2d')!;
+  const grad = ctx.createRadialGradient(64, 64, 0, 64, 64, 64);
+  grad.addColorStop(0, 'rgba(255, 255, 240, 0.95)');
+  grad.addColorStop(0.3, 'rgba(255, 220, 140, 0.6)');
+  grad.addColorStop(0.7, 'rgba(255, 180, 80, 0.15)');
+  grad.addColorStop(1, 'rgba(255, 150, 50, 0)');
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, 128, 128);
+
+  const flareTex = new THREE.CanvasTexture(canvas);
+  const flareMat = new THREE.SpriteMaterial({
+    map: flareTex,
+    transparent: true,
+    blending: THREE.AdditiveBlending,
+    depthWrite: false,
+  });
+  const sunSprite = new THREE.Sprite(flareMat);
+  sunSprite.position.set(-165, 280, 195);
+  sunSprite.scale.set(130, 130, 1);
+  scene.add(sunSprite);
+
+  // Distant hazy cloud particles high above scene
+  const cloudCount = 20;
+  const cloudGeo = new THREE.BufferGeometry();
+  const cloudPositions = new Float32Array(cloudCount * 3);
+  for (let i = 0; i < cloudCount; i++) {
+    cloudPositions[i * 3] = (Math.random() - 0.5) * 1500;
+    cloudPositions[i * 3 + 1] = 290 + Math.random() * 80;
+    cloudPositions[i * 3 + 2] = (Math.random() - 0.5) * 1500;
+  }
+  cloudGeo.setAttribute('position', new THREE.BufferAttribute(cloudPositions, 3));
+
+  const cloudCanvas = document.createElement('canvas');
+  cloudCanvas.width = 64;
+  cloudCanvas.height = 64;
+  const cCtx = cloudCanvas.getContext('2d')!;
+  const cGrad = cCtx.createRadialGradient(32, 32, 0, 32, 32, 32);
+  cGrad.addColorStop(0, 'rgba(255, 255, 255, 0.6)');
+  cGrad.addColorStop(0.5, 'rgba(240, 246, 255, 0.28)');
+  cGrad.addColorStop(1, 'rgba(230, 240, 255, 0)');
+  cCtx.fillStyle = cGrad;
+  cCtx.fillRect(0, 0, 64, 64);
+
+  const cloudTex = new THREE.CanvasTexture(cloudCanvas);
+  const cloudMat = new THREE.PointsMaterial({
+    size: 240,
+    map: cloudTex,
+    transparent: true,
+    opacity: 0.7,
+    depthWrite: false,
+    blending: THREE.NormalBlending,
+  });
+  const cloudPoints = new THREE.Points(cloudGeo, cloudMat);
+  scene.add(cloudPoints);
+
+  return () => {
+    flareTex.dispose();
+    flareMat.dispose();
+    scene.remove(sunSprite);
+    cloudGeo.dispose();
+    cloudTex.dispose();
+    cloudMat.dispose();
+    scene.remove(cloudPoints);
+  };
+}
+
 // Pre-allocated scratch math objects to keep the render loop GC-free
 const _desiredCamPos = new THREE.Vector3();
 const _desiredCamTarget = new THREE.Vector3();
@@ -46,8 +123,10 @@ const _forwardVec = new THREE.Vector3();
 interface GoKartTrackCanvasProps {
   cameraMode: CameraMode;
   spectatorResetTick: number;
+  restartRaceTick: number;
   touchInputRef: MutableRefObject<KartInputState>;
   freeCamTouchInputRef: MutableRefObject<FreeCameraInputState>;
+  onRaceStateChange: (state: RaceState) => void;
   onToggleFollow: () => void;
   onToggleFreeCam: () => void;
   onResetSpectator: () => void;
@@ -56,8 +135,10 @@ interface GoKartTrackCanvasProps {
 export function GoKartTrackCanvas({
   cameraMode,
   spectatorResetTick,
+  restartRaceTick,
   touchInputRef,
   freeCamTouchInputRef,
+  onRaceStateChange,
   onToggleFollow,
   onToggleFreeCam,
   onResetSpectator,
@@ -65,6 +146,8 @@ export function GoKartTrackCanvas({
   const containerRef = useRef<HTMLDivElement>(null);
   const cameraModeRef = useRef<CameraMode>(cameraMode);
   const spectatorResetTickRef = useRef<number>(spectatorResetTick);
+  const restartRaceTickRef = useRef<number>(restartRaceTick);
+  const onRaceStateChangeRef = useRef(onRaceStateChange);
   const onToggleFollowRef = useRef(onToggleFollow);
   const onToggleFreeCamRef = useRef(onToggleFreeCam);
   const onResetSpectatorRef = useRef(onResetSpectator);
@@ -79,6 +162,14 @@ export function GoKartTrackCanvas({
   useEffect(() => {
     spectatorResetTickRef.current = spectatorResetTick;
   }, [spectatorResetTick]);
+
+  useEffect(() => {
+    restartRaceTickRef.current = restartRaceTick;
+  }, [restartRaceTick]);
+
+  useEffect(() => {
+    onRaceStateChangeRef.current = onRaceStateChange;
+  }, [onRaceStateChange]);
 
   useEffect(() => {
     onToggleFollowRef.current = onToggleFollow;
@@ -160,10 +251,16 @@ export function GoKartTrackCanvas({
     fillLight.position.set(160, 120, -150);
     scene.add(fillLight);
 
+    // Subtle atmospheric effect (distant hazy clouds & sun flare)
+    const disposeAtmosphere = createAtmosphericEffects(scene);
+
     // Enlarged 2x track environment, banners, and empty open-air stadium outside grass field
     const curve = createTrackCurve();
     const frames = sampleTrackFrames(curve, 640);
     const bannerPlacements = getBannerPlacements(curve);
+    const checkpoints = generateCheckpoints(frames, 6);
+    const finishPos = bannerPlacements.finish.position;
+    const finishTangent = bannerPlacements.finish.tangent;
 
     // Subtle expansive distant terrain plane so the stadium park sits grounded in a soft horizon
     const horizonGroundGeo = new THREE.PlaneGeometry(5200, 5200);
@@ -193,6 +290,9 @@ export function GoKartTrackCanvas({
     kartRig.group.position.set(kartState.x, 0.04, kartState.z);
     kartRig.group.rotation.y = kartState.yaw;
     scene.add(kartRig.group);
+
+    // Race state management
+    let raceState = createInitialRaceState(3, 6);
 
     // Cinematic elevated three-quarter city skyline spectator camera & upright free-camera
     const spectatorCtrl = new SpectatorCameraController();
@@ -226,6 +326,7 @@ export function GoKartTrackCanvas({
     let returningToSpectator = false;
     let prevCameraMode: CameraMode = cameraModeRef.current;
     let prevResetTick = spectatorResetTickRef.current;
+    let prevRestartTick = restartRaceTickRef.current;
 
     // Keyboard input states (kart + free camera)
     const keyInput: KartInputState = {
@@ -607,6 +708,9 @@ export function GoKartTrackCanvas({
       container.setAttribute('data-spectator-elevation', specElevDeg.toFixed(1));
       container.setAttribute('data-spectator-azimuth', specAzimDeg.toFixed(1));
       container.setAttribute('data-spectator-distance', specDist.toFixed(1));
+      container.setAttribute('data-race-status', raceState.status);
+      container.setAttribute('data-race-lap', String(raceState.lap));
+      container.setAttribute('data-race-cp', String(raceState.currentCheckpointIndex));
     }
 
     function tick() {
@@ -617,8 +721,9 @@ export function GoKartTrackCanvas({
 
       const mode = cameraModeRef.current;
       const resetTick = spectatorResetTickRef.current;
+      const restartTick = restartRaceTickRef.current;
 
-      // Mode & explicit Home reset transitions
+      // Mode & explicit Home reset / Restart transitions
       if (mode !== prevCameraMode) {
         prevCameraMode = mode;
         activeMouseButton = null;
@@ -647,8 +752,31 @@ export function GoKartTrackCanvas({
         }
       }
 
-      // Kart physics (only takes player driving inputs when not in Free-Cam mode)
-      if (mode === 'free') {
+      if (restartTick !== prevRestartTick) {
+        prevRestartTick = restartTick;
+        raceState = createInitialRaceState(3, 6);
+        kartState = createInitialKartState(curve);
+        kartRig.group.position.set(kartState.x, 0.04, kartState.z);
+        kartRig.group.rotation.y = kartState.yaw;
+      }
+
+      // Update race state machine
+      raceState = updateRaceState(
+        raceState,
+        kartState.x,
+        kartState.z,
+        kartState.speed,
+        kartState.yaw,
+        dt,
+        checkpoints,
+        finishPos,
+        finishTangent,
+      );
+      onRaceStateChangeRef.current(raceState);
+
+      // Kart physics (only takes player driving inputs when racing and not in Free-Cam)
+      const drivingActive = raceState.status === 'racing' && !raceState.isFinished && mode !== 'free';
+      if (!drivingActive) {
         mergedKartInput.accelerate = false;
         mergedKartInput.brakeReverse = false;
         mergedKartInput.steerLeft = false;
@@ -821,6 +949,7 @@ export function GoKartTrackCanvas({
       window.removeEventListener('resize', onResize);
       controls.removeEventListener('start', onControlsStart);
       controls.dispose();
+      disposeAtmosphere();
       kartRig.dispose();
       stadiumBuild.dispose();
       trackBuild.dispose();
