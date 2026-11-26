@@ -1,4 +1,5 @@
 import { FIELD_HALF, PARK_HALF } from '../track/trackLayout';
+import { TOWN_PALETTE } from './townSculptor';
 
 export interface TownRoadRect {
   id: string;
@@ -28,233 +29,291 @@ export interface TownColliderBox {
   zMax: number;
 }
 
+export const UNIFORM_BLOCK_WIDTH = 44;
+export const UNIFORM_BLOCK_DEPTH = 40;
+
+export type TownBlockKind =
+  | 'parking'
+  | 'market'
+  | 'park_fountain'
+  | 'park_gazebo'
+  | 'pocket_park'
+  | 'commercial_res'
+  | 'residential';
+
+export interface TownBlockSpec {
+  id: string;
+  col: number;
+  row: number;
+  xMin: number;
+  xMax: number;
+  zMin: number;
+  zMax: number;
+  kind: TownBlockKind;
+  pavingStyle: 'cream' | 'sand' | 'cobble' | 'rose' | 'lawn';
+}
+
 export const TOWN_BOUNDS = {
   xMin: -180,
   xMax: 180,
   zMin: PARK_HALF, // 212
-  zMax: 422,
+  zMax: 424,
   groundY: -0.85,
   roadSurfaceY: -0.71,
   sidewalkSurfaceY: -0.64,
 } as const;
 
 export const KART_TOWN_SPAWN = {
-  x: 2.4,
-  z: 318,
-  yaw: Math.PI, // Facing North (-Z) along Main Avenue toward the stadium gate
+  x: 2.25,
+  z: 294,
+  yaw: Math.PI, // Facing North (-Z) along Main Avenue toward the market & stadium gate
 } as const;
 
-/**
- * Threshold Z coordinate for entering the stadium bowl through the South Gate.
- * South Stand gate is centered around z = 150; crossing z < 156 means the kart
- * has physically entered the stadium and starts the race countdown.
- */
 export const STADIUM_GATE_TRIGGER_Z = 156;
 export const STADIUM_GATE_CORRIDOR_HALF_WIDTH = 13.5;
 
+const COL_SPANS: ReadonlyArray<[number, number]> = [
+  [-148.5, -104.5], // Col 0 (width 44)
+  [-99.0, -55.0],   // Col 1 (width 44)
+  [-48.5, -4.5],    // Col 2 (width 44)
+  [4.5, 48.5],      // Col 3 (width 44)
+  [55.0, 99.0],     // Col 4 (width 44)
+  [104.5, 148.5],   // Col 5 (width 44)
+];
+
+const ROW_SPANS: ReadonlyArray<[number, number]> = [
+  [226.0, 266.0], // Row 0 (depth 40)
+  [273.0, 313.0], // Row 1 (depth 40)
+  [318.5, 358.5], // Row 2 (depth 40)
+  [365.5, 405.5], // Row 3 (depth 40)
+];
+
+const BLOCK_META: ReadonlyArray<ReadonlyArray<{ kind: TownBlockKind; pavingStyle: TownBlockSpec['pavingStyle'] }>> = [
+  // Row 0 (North Market & Stadium Frontage)
+  [
+    { kind: 'residential', pavingStyle: 'cream' },      // r0 c0
+    { kind: 'commercial_res', pavingStyle: 'rose' },    // r0 c1 Corner Patisserie
+    { kind: 'parking', pavingStyle: 'sand' },           // r0 c2 Stadium Main Parking
+    { kind: 'market', pavingStyle: 'cobble' },          // r0 c3 Farmers' Market Plaza
+    { kind: 'parking', pavingStyle: 'sand' },           // r0 c4 East Visitor Parking
+    { kind: 'commercial_res', pavingStyle: 'cream' },   // r0 c5 Market Bookshop
+  ],
+  // Row 1 (Midtown North: Café Row & Botanical Fountain Park flanking Kart Spawn)
+  [
+    { kind: 'residential', pavingStyle: 'sand' },       // r1 c0
+    { kind: 'residential', pavingStyle: 'cream' },      // r1 c1
+    { kind: 'commercial_res', pavingStyle: 'rose' },    // r1 c2 Main Ave Café & Bakery
+    { kind: 'park_fountain', pavingStyle: 'lawn' },     // r1 c3 Central Botanical Fountain Park
+    { kind: 'commercial_res', pavingStyle: 'cream' },   // r1 c4 East Parkside Shops
+    { kind: 'residential', pavingStyle: 'sand' },       // r1 c5
+  ],
+  // Row 2 (Midtown South: Pocket Park, Mart, South Gazebo Park)
+  [
+    { kind: 'residential', pavingStyle: 'cream' },      // r2 c0
+    { kind: 'pocket_park', pavingStyle: 'lawn' },       // r2 c1 West Pocket Clock Park
+    { kind: 'commercial_res', pavingStyle: 'cream' },   // r2 c2 Midtown Mart & Residences
+    { kind: 'park_gazebo', pavingStyle: 'lawn' },       // r2 c3 South Park & Timber Gazebo
+    { kind: 'residential', pavingStyle: 'rose' },       // r2 c4
+    { kind: 'residential', pavingStyle: 'cream' },      // r2 c5
+  ],
+  // Row 3 (South Town Boulevards)
+  [
+    { kind: 'commercial_res', pavingStyle: 'cobble' },  // r3 c0 West Corner Market & Homes
+    { kind: 'residential', pavingStyle: 'sand' },       // r3 c1
+    { kind: 'commercial_res', pavingStyle: 'cream' },   // r3 c2 South Avenue Residences
+    { kind: 'commercial_res', pavingStyle: 'cobble' },  // r3 c3 South Avenue Market & Homes
+    { kind: 'residential', pavingStyle: 'sand' },       // r3 c4
+    { kind: 'commercial_res', pavingStyle: 'cream' },   // r3 c5 East Corner Florist & Homes
+  ],
+];
+
 /**
- * All driveable roads in the town + connector road into the stadium.
- * Main avenues are 8.4-9.6 units wide (two narrow lanes), and neighborhood
- * side streets / alleys are 4.4-6.0 units wide ("small small roads").
+ * All 24 uniform city blocks (6 columns x 4 rows), every single block strictly 44 x 40 units.
+ */
+export const TOWN_BLOCKS: ReadonlyArray<TownBlockSpec> = ROW_SPANS.flatMap(([zMin, zMax], row) =>
+  COL_SPANS.map(([xMin, xMax], col) => ({
+    id: `block_r${row}_c${col}`,
+    col,
+    row,
+    xMin,
+    xMax,
+    zMin,
+    zMax,
+    kind: BLOCK_META[row][col].kind,
+    pavingStyle: BLOCK_META[row][col].pavingStyle,
+  })),
+);
+
+/**
+ * Small multi-lane streets and narrow neighborhood alleys separating every uniform block.
  */
 export const TOWN_ROADS: ReadonlyArray<TownRoadRect> = [
   // Central 2-lane Main Avenue connecting town straight through South Gate to track edge
   {
     id: 'main_avenue',
-    xMin: -4.8,
-    xMax: 4.8,
+    xMin: -4.5,
+    xMax: 4.5,
     zMin: 99,
-    zMax: 412,
+    zMax: 411.5,
     axis: 'ns',
     lanes: 2,
     isConnector: true,
   },
-  // East-West 2-lane streets
-  {
-    id: 'north_ring_road',
-    xMin: -152,
-    xMax: 152,
-    zMin: 223,
-    zMax: 232,
-    axis: 'ew',
-    lanes: 2,
-  },
-  {
-    id: 'midtown_blvd',
-    xMin: -152,
-    xMax: 152,
-    zMin: 288,
-    zMax: 297,
-    axis: 'ew',
-    lanes: 2,
-  },
-  {
-    id: 'south_town_road',
-    xMin: -152,
-    xMax: 152,
-    zMin: 370,
-    zMax: 379,
-    axis: 'ew',
-    lanes: 2,
-  },
-  // Small outer south lane
-  {
-    id: 'outer_south_lane',
-    xMin: -152,
-    xMax: 152,
-    zMin: 406,
-    zMax: 412,
-    axis: 'ew',
-    lanes: 1,
-  },
-  // Small North-South side streets
+  // Secondary N-S 2-lane streets (6.5 units wide)
   {
     id: 'west_shop_street',
-    xMin: -79,
-    xMax: -73,
-    zMin: 223,
-    zMax: 412,
+    xMin: -55.0,
+    xMax: -48.5,
+    zMin: 218.0,
+    zMax: 411.5,
     axis: 'ns',
     lanes: 2,
   },
   {
     id: 'east_park_street',
-    xMin: 73,
-    xMax: 79,
-    zMin: 223,
-    zMax: 412,
+    xMin: 48.5,
+    xMax: 55.0,
+    zMin: 218.0,
+    zMax: 411.5,
     axis: 'ns',
     lanes: 2,
   },
+  // Narrow N-S neighborhood alleys / lanes (5.5 units wide)
+  {
+    id: 'west_cottage_lane',
+    xMin: -104.5,
+    xMax: -99.0,
+    zMin: 218.0,
+    zMax: 411.5,
+    axis: 'ns',
+    lanes: 1,
+  },
+  {
+    id: 'east_cottage_lane',
+    xMin: 99.0,
+    xMax: 104.5,
+    zMin: 218.0,
+    zMax: 411.5,
+    axis: 'ns',
+    lanes: 1,
+  },
   {
     id: 'far_west_lane',
-    xMin: -152,
-    xMax: -146.5,
-    zMin: 223,
-    zMax: 412,
+    xMin: -154.0,
+    xMax: -148.5,
+    zMin: 218.0,
+    zMax: 411.5,
     axis: 'ns',
     lanes: 1,
   },
   {
     id: 'far_east_lane',
-    xMin: 146.5,
-    xMax: 152,
-    zMin: 223,
-    zMax: 412,
+    xMin: 148.5,
+    xMax: 154.0,
+    zMin: 218.0,
+    zMax: 411.5,
     axis: 'ns',
     lanes: 1,
   },
-  // Small neighborhood alleys & cross lanes ("small small roads")
+  // E-W 2-lane streets & narrow cross alleys
   {
-    id: 'market_bazaar_alley',
-    xMin: 36.5,
-    xMax: 41.5,
-    zMin: 232,
-    zMax: 288,
-    axis: 'ns',
-    lanes: 1,
+    id: 'north_ring_road',
+    xMin: -154.0,
+    xMax: 154.0,
+    zMin: 218.0,
+    zMax: 226.0,
+    axis: 'ew',
+    lanes: 2,
   },
   {
-    id: 'parking_drive_aisle',
-    xMin: -73,
-    xMax: -4.8,
-    zMin: 257,
-    zMax: 263,
+    id: 'midtown_north_st',
+    xMin: -154.0,
+    xMax: 154.0,
+    zMin: 266.0,
+    zMax: 273.0,
+    axis: 'ew',
+    lanes: 2,
+  },
+  {
+    id: 'blossom_alley',
+    xMin: -154.0,
+    xMax: 154.0,
+    zMin: 313.0,
+    zMax: 318.5,
     axis: 'ew',
     lanes: 1,
   },
   {
-    id: 'west_townhouse_alley',
-    xMin: -115.5,
-    xMax: -110.5,
-    zMin: 232,
-    zMax: 406,
-    axis: 'ns',
-    lanes: 1,
-  },
-  {
-    id: 'east_townhouse_alley',
-    xMin: 110.5,
-    xMax: 115.5,
-    zMin: 232,
-    zMax: 406,
-    axis: 'ns',
-    lanes: 1,
-  },
-  {
-    id: 'mid_west_cross_lane',
-    xMin: -146.5,
-    xMax: -4.8,
-    zMin: 332,
-    zMax: 337,
+    id: 'south_market_st',
+    xMin: -154.0,
+    xMax: 154.0,
+    zMin: 358.5,
+    zMax: 365.5,
     axis: 'ew',
-    lanes: 1,
+    lanes: 2,
   },
   {
-    id: 'mid_east_cross_lane',
-    xMin: 79,
-    xMax: 146.5,
-    zMin: 332,
-    zMax: 337,
-    axis: 'ew',
-    lanes: 1,
-  },
-  {
-    id: 'outer_west_cross_lane',
-    xMin: -146.5,
-    xMax: -79,
-    zMin: 257,
-    zMax: 262,
+    id: 'outer_south_lane',
+    xMin: -154.0,
+    xMax: 154.0,
+    zMin: 405.5,
+    zMax: 411.5,
     axis: 'ew',
     lanes: 1,
   },
 ];
 
 export const TOWN_PARKING_LOTS: ReadonlyArray<TownPlazaRect> = [
-  // Main Stadium Parking Lot (NW inner block)
+  // Row 0 Col 2: Stadium Main Parking Lot
   {
     id: 'stadium_main_parking',
-    xMin: -69,
-    xMax: -9,
-    zMin: 236,
-    zMax: 284,
+    xMin: -46.5,
+    xMax: -6.5,
+    zMin: 228.0,
+    zMax: 264.0,
     kind: 'parking',
   },
-  // East Market Visitor Parking Lot
+  // Row 0 Col 4: East Market Visitor Parking Lot
   {
     id: 'east_market_parking',
-    xMin: 82,
-    xMax: 108,
-    zMin: 236,
-    zMax: 284,
+    xMin: 57.0,
+    xMax: 97.0,
+    zMin: 228.0,
+    zMax: 264.0,
     kind: 'parking',
   },
 ];
 
 export const TOWN_PARKS: ReadonlyArray<TownPlazaRect> = [
-  // Central Town Park (Mid-East block)
+  // Row 1 Col 3: Central Botanical Fountain Park
   {
-    id: 'central_town_park',
-    xMin: 8,
-    xMax: 70,
-    zMin: 300,
-    zMax: 367,
+    id: 'central_botanical_park',
+    xMin: 6.5,
+    xMax: 46.5,
+    zMin: 275.0,
+    zMax: 311.0,
     kind: 'park_path',
   },
-  // West Pocket Neighborhood Park
+  // Row 2 Col 3: South Town Park & Gazebo
+  {
+    id: 'south_gazebo_park',
+    xMin: 6.5,
+    xMax: 46.5,
+    zMin: 320.5,
+    zMax: 356.5,
+    kind: 'park_path',
+  },
+  // Row 2 Col 1: West Pocket Clock Park
   {
     id: 'west_pocket_park',
-    xMin: -108,
-    xMax: -82,
-    zMin: 340,
-    zMax: 367,
+    xMin: -97.0,
+    xMax: -57.0,
+    zMin: 320.5,
+    zMax: 356.5,
     kind: 'park_path',
   },
 ];
 
-/**
- * Building & major structure specs shared between 3D mesh generation and kart collision.
- */
 export interface TownBuildingSpec {
   id: string;
   x: number;
@@ -269,329 +328,525 @@ export interface TownBuildingSpec {
   hasShopFront: boolean;
   awningColor?: number;
   signText?: string;
+  roofStyle: 'mansard' | 'terracotta';
+}
+
+const WIN_PALETTE_A = [
+  TOWN_PALETTE.windowWarmLit,
+  TOWN_PALETTE.windowSkyGlass,
+  TOWN_PALETTE.windowRoseGlass,
+  TOWN_PALETTE.windowMintGlass,
+];
+const WIN_PALETTE_B = [
+  TOWN_PALETTE.windowAmberGlass,
+  TOWN_PALETTE.windowSkyGlass,
+  TOWN_PALETTE.windowMintGlass,
+  TOWN_PALETTE.windowWarmLit,
+];
+const WIN_PALETTE_C = [
+  TOWN_PALETTE.windowWarmLit,
+  TOWN_PALETTE.windowRoseGlass,
+  TOWN_PALETTE.windowSkyGlass,
+  TOWN_PALETTE.windowAmberGlass,
+];
+
+/**
+ * Helper to generate a clean pair of distinct European townhouses inside any 44 x 40 uniform block.
+ */
+function makeBlockPair(
+  prefix: string,
+  colIdx: number,
+  rowIdx: number,
+  orientation: 'ns-split' | 'ew-split',
+  a: Omit<TownBuildingSpec, 'id' | 'x' | 'z' | 'w' | 'd'>,
+  b: Omit<TownBuildingSpec, 'id' | 'x' | 'z' | 'w' | 'd'>,
+): TownBuildingSpec[] {
+  const [xMin, xMax] = COL_SPANS[colIdx];
+  const [zMin, zMax] = ROW_SPANS[rowIdx];
+  const cx = (xMin + xMax) * 0.5;
+  const cz = (zMin + zMax) * 0.5;
+
+  if (orientation === 'ew-split') {
+    // Left building + Right building with inner courtyard setback inside the 44x40 block
+    return [
+      { id: `${prefix}_a`, x: cx - 10.2, z: cz, w: 16.4, d: 24.0, ...a },
+      { id: `${prefix}_b`, x: cx + 10.2, z: cz, w: 16.4, d: 24.0, ...b },
+    ];
+  }
+  // North building + South building inside the 44x40 block
+  return [
+    { id: `${prefix}_a`, x: cx, z: cz - 9.2, w: 26.0, d: 14.4, ...a },
+    { id: `${prefix}_b`, x: cx, z: cz + 9.2, w: 26.0, d: 14.4, ...b },
+  ];
 }
 
 export const TOWN_BUILDINGS: ReadonlyArray<TownBuildingSpec> = [
-  // Mid-West Upper Block (facing Main Ave & Midtown Blvd)
-  {
-    id: 'res_mw_1',
-    x: -21,
-    z: 314,
-    w: 22,
-    d: 22,
-    h: 19,
-    wallColor: 0xf7efe4,
-    accentColor: 0x3b4d63,
-    windowPalette: [0xffe082, 0x7dd3fc, 0xfda4af, 0xa7f3d0],
-    facing: 'e',
-    hasShopFront: true,
-    awningColor: 0xe11d48,
-    signText: 'CAFE',
-  },
-  {
-    id: 'res_mw_2',
-    x: -54,
-    z: 314,
-    w: 24,
-    d: 22,
-    h: 23,
-    wallColor: 0xe6eff6,
-    accentColor: 0x334155,
-    windowPalette: [0xfef08a, 0x93c5fd, 0xfecdd3, 0x86efac],
-    facing: 'n',
-    hasShopFront: true,
-    awningColor: 0x0284c7,
-    signText: 'MART',
-  },
-  // Mid-West Lower Block
-  {
-    id: 'res_mw_3',
-    x: -21,
-    z: 353,
-    w: 22,
-    d: 20,
-    h: 22,
-    wallColor: 0xfde8d7,
-    accentColor: 0x6b4226,
-    windowPalette: [0xfde047, 0x67e8f9, 0xfb7185, 0xfdba74],
-    facing: 'e',
-    hasShopFront: true,
-    awningColor: 0x16a34a,
-    signText: 'BAKERY',
-  },
-  {
-    id: 'res_mw_4',
-    x: -54,
-    z: 353,
-    w: 24,
-    d: 20,
-    h: 17,
-    wallColor: 0xeaf4e6,
-    accentColor: 0x2f4f4f,
-    windowPalette: [0xfef08a, 0x7dd3fc, 0xf9a8d4, 0xfde68a],
-    facing: 's',
-    hasShopFront: false,
-  },
-  // Outer West North Block
-  {
-    id: 'res_ow_1',
-    x: -95,
-    z: 244,
-    w: 20,
-    d: 16,
-    h: 16,
-    wallColor: 0xfef3c7,
-    accentColor: 0x78350f,
-    windowPalette: [0xfde047, 0x38bdf8, 0xfb7185, 0x4ade80],
-    facing: 'e',
-    hasShopFront: true,
-    awningColor: 0xd97706,
-  },
-  {
-    id: 'res_ow_2',
-    x: -95,
-    z: 274,
-    w: 20,
-    d: 16,
-    h: 20,
-    wallColor: 0xf1f5f9,
-    accentColor: 0x1e293b,
-    windowPalette: [0xfef08a, 0x60a5fa, 0xf472b6, 0x34d399],
-    facing: 'e',
-    hasShopFront: false,
-  },
-  {
-    id: 'res_ow_3',
-    x: -130,
-    z: 244,
-    w: 22,
-    d: 16,
-    h: 21,
-    wallColor: 0xfce7f3,
-    accentColor: 0x6d28d9,
-    windowPalette: [0xfde047, 0x7dd3fc, 0xfda4af, 0xa5b4fc],
-    facing: 'n',
-    hasShopFront: false,
-  },
-  {
-    id: 'res_ow_4',
-    x: -130,
-    z: 274,
-    w: 22,
-    d: 16,
-    h: 18,
-    wallColor: 0xdbeafe,
-    accentColor: 0x1e3a8a,
-    windowPalette: [0xfef08a, 0x93c5fd, 0xfca5a5, 0x6ee7b7],
-    facing: 's',
-    hasShopFront: true,
-    awningColor: 0x2563eb,
-  },
-  // Outer West Mid Block
-  {
-    id: 'res_ow_5',
-    x: -95,
-    z: 314,
-    w: 20,
-    d: 20,
-    h: 24,
-    wallColor: 0xfed7aa,
-    accentColor: 0x9a3412,
-    windowPalette: [0xfef08a, 0x38bdf8, 0xfb7185, 0x4ade80],
-    facing: 'e',
-    hasShopFront: false,
-  },
-  {
-    id: 'res_ow_6',
-    x: -130,
-    z: 314,
-    w: 22,
-    d: 20,
-    h: 19,
-    wallColor: 0xecfccb,
-    accentColor: 0x3f6212,
-    windowPalette: [0xfde047, 0x67e8f9, 0xfca5a5, 0xfdba74],
-    facing: 'w',
-    hasShopFront: false,
-  },
-  {
-    id: 'res_ow_7',
-    x: -130,
-    z: 353,
-    w: 22,
-    d: 20,
-    h: 22,
-    wallColor: 0xf5f3ff,
-    accentColor: 0x4c1d95,
-    windowPalette: [0xfef08a, 0x7dd3fc, 0xf9a8d4, 0x86efac],
-    facing: 's',
-    hasShopFront: true,
-    awningColor: 0x7c3aed,
-  },
-  // Outer East North-West & East Blocks
-  {
-    id: 'res_oe_1',
-    x: 130,
-    z: 248,
-    w: 22,
-    d: 20,
-    h: 21,
-    wallColor: 0xfef2f2,
-    accentColor: 0x991b1b,
-    windowPalette: [0xfde047, 0x38bdf8, 0xfb7185, 0x6ee7b7],
-    facing: 'w',
-    hasShopFront: true,
-    awningColor: 0xdc2626,
-  },
-  {
-    id: 'res_oe_2',
-    x: 130,
-    z: 274,
-    w: 22,
-    d: 16,
-    h: 17,
-    wallColor: 0xe0f2fe,
-    accentColor: 0x075985,
-    windowPalette: [0xfef08a, 0x7dd3fc, 0xfda4af, 0xfde68a],
-    facing: 's',
-    hasShopFront: false,
-  },
-  // Outer East Mid Block
-  {
-    id: 'res_oe_3',
-    x: 95,
-    z: 314,
-    w: 20,
-    d: 20,
-    h: 22,
-    wallColor: 0xfef9c3,
-    accentColor: 0x854d0e,
-    windowPalette: [0xfef08a, 0x60a5fa, 0xf472b6, 0x4ade80],
-    facing: 'w',
-    hasShopFront: true,
-    awningColor: 0x0d9488,
-  },
-  {
-    id: 'res_oe_4',
-    x: 130,
-    z: 314,
-    w: 22,
-    d: 20,
-    h: 25,
-    wallColor: 0xf3e8ff,
-    accentColor: 0x581c87,
-    windowPalette: [0xfde047, 0x38bdf8, 0xfb7185, 0xa7f3d0],
-    facing: 'e',
-    hasShopFront: false,
-  },
-  {
-    id: 'res_oe_5',
-    x: 95,
-    z: 353,
-    w: 20,
-    d: 20,
-    h: 18,
-    wallColor: 0xffe4e6,
-    accentColor: 0x9f1239,
-    windowPalette: [0xfef08a, 0x7dd3fc, 0xfca5a5, 0x86efac],
-    facing: 'w',
-    hasShopFront: false,
-  },
-  {
-    id: 'res_oe_6',
-    x: 130,
-    z: 353,
-    w: 22,
-    d: 20,
-    h: 20,
-    wallColor: 0xdcfce7,
-    accentColor: 0x166534,
-    windowPalette: [0xfde047, 0x93c5fd, 0xf9a8d4, 0xfdba74],
-    facing: 's',
-    hasShopFront: true,
-    awningColor: 0xea580c,
-  },
-  // South Town Edge Residences
-  {
-    id: 'res_s_1',
-    x: -24,
-    z: 392,
-    w: 24,
-    d: 16,
-    h: 18,
-    wallColor: 0xeff6ff,
-    accentColor: 0x1d4ed8,
-    windowPalette: [0xfef08a, 0x38bdf8, 0xfb7185, 0x4ade80],
-    facing: 'n',
-    hasShopFront: true,
-    awningColor: 0x2563eb,
-  },
-  {
-    id: 'res_s_2',
-    x: 24,
-    z: 392,
-    w: 24,
-    d: 16,
-    h: 19,
-    wallColor: 0xfff7ed,
-    accentColor: 0xc2410c,
-    windowPalette: [0xfde047, 0x67e8f9, 0xf9a8d4, 0x86efac],
-    facing: 'n',
-    hasShopFront: true,
-    awningColor: 0xe11d48,
-  },
-  {
-    id: 'res_s_3',
-    x: -55,
-    z: 392,
-    w: 22,
-    d: 16,
-    h: 16,
-    wallColor: 0xfdf2f8,
-    accentColor: 0x9d174d,
-    windowPalette: [0xfef08a, 0x7dd3fc, 0xfda4af, 0xa7f3d0],
-    facing: 'n',
-    hasShopFront: false,
-  },
-  {
-    id: 'res_s_4',
-    x: 55,
-    z: 392,
-    w: 22,
-    d: 16,
-    h: 17,
-    wallColor: 0xf0fdf4,
-    accentColor: 0x15803d,
-    windowPalette: [0xfde047, 0x93c5fd, 0xfca5a5, 0xfde68a],
-    facing: 'n',
-    hasShopFront: false,
-  },
-  {
-    id: 'res_s_5',
-    x: -95,
-    z: 392,
-    w: 20,
-    d: 16,
-    h: 19,
-    wallColor: 0xfefce8,
-    accentColor: 0x854d0e,
-    windowPalette: [0xfef08a, 0x38bdf8, 0xfb7185, 0x6ee7b7],
-    facing: 'n',
-    hasShopFront: false,
-  },
-  {
-    id: 'res_s_6',
-    x: 95,
-    z: 392,
-    w: 20,
-    d: 16,
-    h: 21,
-    wallColor: 0xf1f5f9,
-    accentColor: 0x334155,
-    windowPalette: [0xfde047, 0x7dd3fc, 0xf9a8d4, 0x4ade80],
-    facing: 'n',
-    hasShopFront: false,
-  },
+  // Row 0 Col 0: West Courtyard Residences
+  ...makeBlockPair(
+    'r0c0',
+    0,
+    0,
+    'ns-split',
+    {
+      h: 16.5,
+      wallColor: TOWN_PALETTE.wallButtercup,
+      accentColor: TOWN_PALETTE.shutterTeal,
+      windowPalette: WIN_PALETTE_A,
+      facing: 's',
+      hasShopFront: false,
+      roofStyle: 'terracotta',
+    },
+    {
+      h: 19.5,
+      wallColor: TOWN_PALETTE.wallPeriwinkle,
+      accentColor: TOWN_PALETTE.shutterCobalt,
+      windowPalette: WIN_PALETTE_B,
+      facing: 'n',
+      hasShopFront: false,
+      roofStyle: 'mansard',
+    },
+  ),
+  // Row 0 Col 1: Corner Patisserie & Café Terrace (faces East toward Stadium Parking)
+  ...makeBlockPair(
+    'r0c1',
+    1,
+    0,
+    'ns-split',
+    {
+      h: 18.0,
+      wallColor: TOWN_PALETTE.wallApricot,
+      accentColor: TOWN_PALETTE.parisGreen,
+      windowPalette: WIN_PALETTE_C,
+      facing: 'e',
+      hasShopFront: true,
+      awningColor: TOWN_PALETTE.awningCoral,
+      signText: 'PATISSERIE',
+      roofStyle: 'mansard',
+    },
+    {
+      h: 15.5,
+      wallColor: TOWN_PALETTE.wallMint,
+      accentColor: TOWN_PALETTE.shutterOlive,
+      windowPalette: WIN_PALETTE_A,
+      facing: 'e',
+      hasShopFront: true,
+      awningColor: TOWN_PALETTE.awningMint,
+      signText: 'BISTRO',
+      roofStyle: 'terracotta',
+    },
+  ),
+  // Row 0 Col 5: Market Bookshop & Residences
+  ...makeBlockPair(
+    'r0c5',
+    5,
+    0,
+    'ns-split',
+    {
+      h: 19.0,
+      wallColor: TOWN_PALETTE.wallCoral,
+      accentColor: TOWN_PALETTE.parisGreen,
+      windowPalette: WIN_PALETTE_B,
+      facing: 'w',
+      hasShopFront: true,
+      awningColor: TOWN_PALETTE.awningGold,
+      signText: 'BOOKSHOP',
+      roofStyle: 'mansard',
+    },
+    {
+      h: 16.0,
+      wallColor: TOWN_PALETTE.wallCreamTrim,
+      accentColor: TOWN_PALETTE.shutterCobalt,
+      windowPalette: WIN_PALETTE_A,
+      facing: 's',
+      hasShopFront: false,
+      roofStyle: 'terracotta',
+    },
+  ),
+  // Row 1 Col 0
+  ...makeBlockPair(
+    'r1c0',
+    0,
+    1,
+    'ew-split',
+    {
+      h: 17.5,
+      wallColor: TOWN_PALETTE.wallSage,
+      accentColor: TOWN_PALETTE.shutterTeal,
+      windowPalette: WIN_PALETTE_C,
+      facing: 's',
+      hasShopFront: false,
+      roofStyle: 'mansard',
+    },
+    {
+      h: 20.5,
+      wallColor: TOWN_PALETTE.wallOchre,
+      accentColor: TOWN_PALETTE.shutterRose,
+      windowPalette: WIN_PALETTE_A,
+      facing: 'e',
+      hasShopFront: false,
+      roofStyle: 'terracotta',
+    },
+  ),
+  // Row 1 Col 1
+  ...makeBlockPair(
+    'r1c1',
+    1,
+    1,
+    'ew-split',
+    {
+      h: 18.5,
+      wallColor: TOWN_PALETTE.wallLavender,
+      accentColor: TOWN_PALETTE.shutterCobalt,
+      windowPalette: WIN_PALETTE_B,
+      facing: 'n',
+      hasShopFront: false,
+      roofStyle: 'terracotta',
+    },
+    {
+      h: 16.5,
+      wallColor: TOWN_PALETTE.wallButtercup,
+      accentColor: TOWN_PALETTE.shutterOlive,
+      windowPalette: WIN_PALETTE_A,
+      facing: 'e',
+      hasShopFront: true,
+      awningColor: TOWN_PALETTE.awningCobalt,
+      roofStyle: 'mansard',
+    },
+  ),
+  // Row 1 Col 2: Main Ave Café & Bakery Row (immediately West of Kart Spawn!)
+  ...makeBlockPair(
+    'r1c2',
+    2,
+    1,
+    'ns-split',
+    {
+      h: 19.5,
+      wallColor: TOWN_PALETTE.wallApricot,
+      accentColor: TOWN_PALETTE.shutterCobalt,
+      windowPalette: WIN_PALETTE_A,
+      facing: 'e',
+      hasShopFront: true,
+      awningColor: TOWN_PALETTE.awningCoral,
+      signText: 'CAFE',
+      roofStyle: 'mansard',
+    },
+    {
+      h: 17.5,
+      wallColor: TOWN_PALETTE.wallCreamTrim,
+      accentColor: TOWN_PALETTE.parisGreen,
+      windowPalette: WIN_PALETTE_C,
+      facing: 'e',
+      hasShopFront: true,
+      awningColor: TOWN_PALETTE.awningMint,
+      signText: 'BAKERY',
+      roofStyle: 'terracotta',
+    },
+  ),
+  // Row 1 Col 4: East Parkside Gelato & Residences
+  ...makeBlockPair(
+    'r1c4',
+    4,
+    1,
+    'ns-split',
+    {
+      h: 17.0,
+      wallColor: TOWN_PALETTE.wallPeriwinkle,
+      accentColor: TOWN_PALETTE.shutterTeal,
+      windowPalette: WIN_PALETTE_B,
+      facing: 'w',
+      hasShopFront: true,
+      awningColor: TOWN_PALETTE.awningGold,
+      signText: 'GELATO',
+      roofStyle: 'terracotta',
+    },
+    {
+      h: 20.5,
+      wallColor: TOWN_PALETTE.wallCoral,
+      accentColor: TOWN_PALETTE.shutterOlive,
+      windowPalette: WIN_PALETTE_A,
+      facing: 'w',
+      hasShopFront: false,
+      roofStyle: 'mansard',
+    },
+  ),
+  // Row 1 Col 5
+  ...makeBlockPair(
+    'r1c5',
+    5,
+    1,
+    'ew-split',
+    {
+      h: 16.5,
+      wallColor: TOWN_PALETTE.wallMint,
+      accentColor: TOWN_PALETTE.shutterTeal,
+      windowPalette: WIN_PALETTE_C,
+      facing: 'w',
+      hasShopFront: false,
+      roofStyle: 'mansard',
+    },
+    {
+      h: 19.0,
+      wallColor: TOWN_PALETTE.wallButtercup,
+      accentColor: TOWN_PALETTE.shutterRose,
+      windowPalette: WIN_PALETTE_A,
+      facing: 's',
+      hasShopFront: false,
+      roofStyle: 'terracotta',
+    },
+  ),
+  // Row 2 Col 0
+  ...makeBlockPair(
+    'r2c0',
+    0,
+    2,
+    'ns-split',
+    {
+      h: 18.0,
+      wallColor: TOWN_PALETTE.wallCoral,
+      accentColor: TOWN_PALETTE.shutterCobalt,
+      windowPalette: WIN_PALETTE_B,
+      facing: 'e',
+      hasShopFront: false,
+      roofStyle: 'terracotta',
+    },
+    {
+      h: 16.0,
+      wallColor: TOWN_PALETTE.wallLavender,
+      accentColor: TOWN_PALETTE.shutterOlive,
+      windowPalette: WIN_PALETTE_A,
+      facing: 's',
+      hasShopFront: false,
+      roofStyle: 'mansard',
+    },
+  ),
+  // Row 2 Col 2: Midtown Mart & Townhouses
+  ...makeBlockPair(
+    'r2c2',
+    2,
+    2,
+    'ns-split',
+    {
+      h: 20.0,
+      wallColor: TOWN_PALETTE.wallPeriwinkle,
+      accentColor: TOWN_PALETTE.shutterCobalt,
+      windowPalette: WIN_PALETTE_A,
+      facing: 'e',
+      hasShopFront: true,
+      awningColor: TOWN_PALETTE.awningCobalt,
+      signText: 'MART',
+      roofStyle: 'mansard',
+    },
+    {
+      h: 17.5,
+      wallColor: TOWN_PALETTE.wallOchre,
+      accentColor: TOWN_PALETTE.shutterTeal,
+      windowPalette: WIN_PALETTE_C,
+      facing: 'e',
+      hasShopFront: false,
+      roofStyle: 'terracotta',
+    },
+  ),
+  // Row 2 Col 4
+  ...makeBlockPair(
+    'r2c4',
+    4,
+    2,
+    'ew-split',
+    {
+      h: 18.5,
+      wallColor: TOWN_PALETTE.wallApricot,
+      accentColor: TOWN_PALETTE.shutterRose,
+      windowPalette: WIN_PALETTE_B,
+      facing: 'w',
+      hasShopFront: false,
+      roofStyle: 'mansard',
+    },
+    {
+      h: 16.5,
+      wallColor: TOWN_PALETTE.wallSage,
+      accentColor: TOWN_PALETTE.shutterOlive,
+      windowPalette: WIN_PALETTE_A,
+      facing: 's',
+      hasShopFront: false,
+      roofStyle: 'terracotta',
+    },
+  ),
+  // Row 2 Col 5
+  ...makeBlockPair(
+    'r2c5',
+    5,
+    2,
+    'ns-split',
+    {
+      h: 21.0,
+      wallColor: TOWN_PALETTE.wallCreamTrim,
+      accentColor: TOWN_PALETTE.shutterCobalt,
+      windowPalette: WIN_PALETTE_C,
+      facing: 'w',
+      hasShopFront: false,
+      roofStyle: 'mansard',
+    },
+    {
+      h: 17.0,
+      wallColor: TOWN_PALETTE.wallMint,
+      accentColor: TOWN_PALETTE.shutterTeal,
+      windowPalette: WIN_PALETTE_A,
+      facing: 's',
+      hasShopFront: false,
+      roofStyle: 'terracotta',
+    },
+  ),
+  // Row 3 Col 0..5 South Boulevards
+  ...makeBlockPair(
+    'r3c0',
+    0,
+    3,
+    'ew-split',
+    {
+      h: 17.5,
+      wallColor: TOWN_PALETTE.wallButtercup,
+      accentColor: TOWN_PALETTE.shutterTeal,
+      windowPalette: WIN_PALETTE_A,
+      facing: 'n',
+      hasShopFront: true,
+      awningColor: TOWN_PALETTE.awningCoral,
+      roofStyle: 'terracotta',
+    },
+    {
+      h: 15.5,
+      wallColor: TOWN_PALETTE.wallPeriwinkle,
+      accentColor: TOWN_PALETTE.shutterCobalt,
+      windowPalette: WIN_PALETTE_B,
+      facing: 'n',
+      hasShopFront: false,
+      roofStyle: 'mansard',
+    },
+  ),
+  ...makeBlockPair(
+    'r3c1',
+    1,
+    3,
+    'ew-split',
+    {
+      h: 18.0,
+      wallColor: TOWN_PALETTE.wallCoral,
+      accentColor: TOWN_PALETTE.shutterOlive,
+      windowPalette: WIN_PALETTE_C,
+      facing: 'n',
+      hasShopFront: false,
+      roofStyle: 'mansard',
+    },
+    {
+      h: 16.5,
+      wallColor: TOWN_PALETTE.wallCreamTrim,
+      accentColor: TOWN_PALETTE.shutterRose,
+      windowPalette: WIN_PALETTE_A,
+      facing: 'n',
+      hasShopFront: false,
+      roofStyle: 'terracotta',
+    },
+  ),
+  ...makeBlockPair(
+    'r3c2',
+    2,
+    3,
+    'ew-split',
+    {
+      h: 17.0,
+      wallColor: TOWN_PALETTE.wallSage,
+      accentColor: TOWN_PALETTE.shutterTeal,
+      windowPalette: WIN_PALETTE_B,
+      facing: 'n',
+      hasShopFront: false,
+      roofStyle: 'terracotta',
+    },
+    {
+      h: 19.0,
+      wallColor: TOWN_PALETTE.wallApricot,
+      accentColor: TOWN_PALETTE.shutterCobalt,
+      windowPalette: WIN_PALETTE_A,
+      facing: 'e',
+      hasShopFront: true,
+      awningColor: TOWN_PALETTE.awningPlum,
+      signText: 'ATELIER',
+      roofStyle: 'mansard',
+    },
+  ),
+  ...makeBlockPair(
+    'r3c3',
+    3,
+    3,
+    'ew-split',
+    {
+      h: 18.5,
+      wallColor: TOWN_PALETTE.wallOchre,
+      accentColor: TOWN_PALETTE.parisGreen,
+      windowPalette: WIN_PALETTE_C,
+      facing: 'w',
+      hasShopFront: true,
+      awningColor: TOWN_PALETTE.awningGold,
+      signText: 'FLORIST',
+      roofStyle: 'mansard',
+    },
+    {
+      h: 16.5,
+      wallColor: TOWN_PALETTE.wallMint,
+      accentColor: TOWN_PALETTE.shutterOlive,
+      windowPalette: WIN_PALETTE_A,
+      facing: 'n',
+      hasShopFront: false,
+      roofStyle: 'terracotta',
+    },
+  ),
+  ...makeBlockPair(
+    'r3c4',
+    4,
+    3,
+    'ew-split',
+    {
+      h: 17.5,
+      wallColor: TOWN_PALETTE.wallLavender,
+      accentColor: TOWN_PALETTE.shutterCobalt,
+      windowPalette: WIN_PALETTE_B,
+      facing: 'n',
+      hasShopFront: false,
+      roofStyle: 'terracotta',
+    },
+    {
+      h: 19.5,
+      wallColor: TOWN_PALETTE.wallCoral,
+      accentColor: TOWN_PALETTE.shutterTeal,
+      windowPalette: WIN_PALETTE_A,
+      facing: 'n',
+      hasShopFront: false,
+      roofStyle: 'mansard',
+    },
+  ),
+  ...makeBlockPair(
+    'r3c5',
+    5,
+    3,
+    'ew-split',
+    {
+      h: 18.0,
+      wallColor: TOWN_PALETTE.wallButtercup,
+      accentColor: TOWN_PALETTE.shutterRose,
+      windowPalette: WIN_PALETTE_C,
+      facing: 'n',
+      hasShopFront: true,
+      awningColor: TOWN_PALETTE.awningMint,
+      roofStyle: 'mansard',
+    },
+    {
+      h: 16.0,
+      wallColor: TOWN_PALETTE.wallPeriwinkle,
+      accentColor: TOWN_PALETTE.shutterCobalt,
+      windowPalette: WIN_PALETTE_B,
+      facing: 'n',
+      hasShopFront: false,
+      roofStyle: 'terracotta',
+    },
+  ),
 ];
 
 export interface MarketStallSpec {
@@ -604,23 +859,27 @@ export interface MarketStallSpec {
   goodsType: 'fruit' | 'flowers' | 'bakery' | 'textile' | 'drinks';
 }
 
+/**
+ * 10 market stalls neatly arranged inside the uniform Row 0 Col 3 Market Plaza (x: 4.5..48.5, z: 226..266)
+ * plus 2 East Visitor Parking annex flower/fruit stands inside Row 0 Col 4 corner.
+ */
 export const TOWN_MARKET_STALLS: ReadonlyArray<MarketStallSpec> = [
-  // West row of NE Market Square (facing East into Market Alley)
-  { id: 'stall_1', x: 26, z: 242, yaw: Math.PI * 0.5, canopyColorA: 0xef4444, canopyColorB: 0xffffff, goodsType: 'fruit' },
-  { id: 'stall_2', x: 26, z: 254, yaw: Math.PI * 0.5, canopyColorA: 0x16a34a, canopyColorB: 0xfef08a, goodsType: 'flowers' },
-  { id: 'stall_3', x: 26, z: 266, yaw: Math.PI * 0.5, canopyColorA: 0x2563eb, canopyColorB: 0xffffff, goodsType: 'bakery' },
-  { id: 'stall_4', x: 26, z: 278, yaw: Math.PI * 0.5, canopyColorA: 0xf59e0b, canopyColorB: 0xfffbeb, goodsType: 'drinks' },
-  // East row of NE Market Square (facing West into Market Alley)
-  { id: 'stall_5', x: 52, z: 242, yaw: -Math.PI * 0.5, canopyColorA: 0xd97706, canopyColorB: 0xffffff, goodsType: 'fruit' },
-  { id: 'stall_6', x: 52, z: 254, yaw: -Math.PI * 0.5, canopyColorA: 0xdb2777, canopyColorB: 0xfce7f3, goodsType: 'textile' },
-  { id: 'stall_7', x: 52, z: 266, yaw: -Math.PI * 0.5, canopyColorA: 0x0891b2, canopyColorB: 0xffffff, goodsType: 'fruit' },
-  { id: 'stall_8', x: 52, z: 278, yaw: -Math.PI * 0.5, canopyColorA: 0x65a30d, canopyColorB: 0xffffff, goodsType: 'flowers' },
-  // Roadside market stalls facing Main Ave / South Market plaza
-  { id: 'stall_9', x: 13, z: 246, yaw: -Math.PI * 0.5, canopyColorA: 0xe11d48, canopyColorB: 0xffffff, goodsType: 'drinks' },
-  { id: 'stall_10', x: 13, z: 274, yaw: -Math.PI * 0.5, canopyColorA: 0x0284c7, canopyColorB: 0xfef08a, goodsType: 'bakery' },
-  // South Town roadside stalls
-  { id: 'stall_11', x: -129, z: 392, yaw: 0, canopyColorA: 0xef4444, canopyColorB: 0xfef9c3, goodsType: 'fruit' },
-  { id: 'stall_12', x: 129, z: 392, yaw: 0, canopyColorA: 0x16a34a, canopyColorB: 0xffffff, goodsType: 'flowers' },
+  // West row inside Market Plaza (facing East into center promenade x = 26.5)
+  { id: 'stall_1', x: 16.5, z: 233.5, yaw: Math.PI * 0.5, canopyColorA: TOWN_PALETTE.awningCoral, canopyColorB: TOWN_PALETTE.awningCream, goodsType: 'fruit' },
+  { id: 'stall_2', x: 16.5, z: 242.0, yaw: Math.PI * 0.5, canopyColorA: TOWN_PALETTE.awningMint, canopyColorB: TOWN_PALETTE.awningCream, goodsType: 'flowers' },
+  { id: 'stall_3', x: 16.5, z: 250.5, yaw: Math.PI * 0.5, canopyColorA: TOWN_PALETTE.awningCobalt, canopyColorB: TOWN_PALETTE.awningCream, goodsType: 'bakery' },
+  { id: 'stall_4', x: 16.5, z: 259.0, yaw: Math.PI * 0.5, canopyColorA: TOWN_PALETTE.awningGold, canopyColorB: TOWN_PALETTE.awningCream, goodsType: 'drinks' },
+  // East row inside Market Plaza (facing West into center promenade)
+  { id: 'stall_5', x: 36.5, z: 233.5, yaw: -Math.PI * 0.5, canopyColorA: TOWN_PALETTE.awningGold, canopyColorB: TOWN_PALETTE.awningCream, goodsType: 'fruit' },
+  { id: 'stall_6', x: 36.5, z: 242.0, yaw: -Math.PI * 0.5, canopyColorA: TOWN_PALETTE.awningPlum, canopyColorB: TOWN_PALETTE.awningCream, goodsType: 'textile' },
+  { id: 'stall_7', x: 36.5, z: 250.5, yaw: -Math.PI * 0.5, canopyColorA: TOWN_PALETTE.awningCobalt, canopyColorB: TOWN_PALETTE.awningCream, goodsType: 'fruit' },
+  { id: 'stall_8', x: 36.5, z: 259.0, yaw: -Math.PI * 0.5, canopyColorA: TOWN_PALETTE.awningMint, canopyColorB: TOWN_PALETTE.awningCream, goodsType: 'flowers' },
+  // Main Avenue front edge stalls inside Market Plaza facing West toward Main Ave
+  { id: 'stall_9', x: 9.2, z: 238.0, yaw: -Math.PI * 0.5, canopyColorA: TOWN_PALETTE.awningCoral, canopyColorB: TOWN_PALETTE.awningCream, goodsType: 'drinks' },
+  { id: 'stall_10', x: 9.2, z: 254.0, yaw: -Math.PI * 0.5, canopyColorA: TOWN_PALETTE.awningCobalt, canopyColorB: TOWN_PALETTE.awningCream, goodsType: 'bakery' },
+  // South Plaza roadside stalls inside Row 3 Col 2 & Col 3 plazas
+  { id: 'stall_11', x: -26.5, z: 373.0, yaw: 0, canopyColorA: TOWN_PALETTE.awningCoral, canopyColorB: TOWN_PALETTE.awningCream, goodsType: 'fruit' },
+  { id: 'stall_12', x: 26.5, z: 373.0, yaw: 0, canopyColorA: TOWN_PALETTE.awningMint, canopyColorB: TOWN_PALETTE.awningCream, goodsType: 'flowers' },
 ];
 
 export const TOWN_COLLIDERS: ReadonlyArray<TownColliderBox> = [
@@ -630,11 +889,13 @@ export const TOWN_COLLIDERS: ReadonlyArray<TownColliderBox> = [
   { id: 'stadium_east_pavilion', xMin: 131, xMax: 164, zMin: -66, zMax: 66 },
   { id: 'stadium_south_west_wing', xMin: -90, xMax: -13.5, zMin: 130, zMax: 154 },
   { id: 'stadium_south_east_wing', xMin: 13.5, xMax: 90, zMin: 130, zMax: 154 },
-  // Central Town Park Fountain collider
-  { id: 'central_park_fountain', xMin: 34.5, xMax: 43.5, zMin: 329, zMax: 338 },
-  // Gazebo collider in Central Town Park NE corner
-  { id: 'central_park_gazebo', xMin: 56, xMax: 65, zMin: 306, zMax: 315 },
-  // All town buildings
+  // Central Botanical Fountain Park (Row 1 Col 3 center: x=26.5, z=293)
+  { id: 'central_park_fountain', xMin: 21.8, xMax: 31.2, zMin: 288.3, zMax: 297.7 },
+  // South Park Timber Gazebo (Row 2 Col 3 center: x=26.5, z=338.5)
+  { id: 'south_park_gazebo', xMin: 22.0, xMax: 31.0, zMin: 334.0, zMax: 343.0 },
+  // West Pocket Park Clock Obelisk (Row 2 Col 1 center: x=-77, z=338.5)
+  { id: 'west_pocket_obelisk', xMin: -79.2, xMax: -74.8, zMin: 336.3, zMax: 340.7 },
+  // All sculpted townhouses & shops
   ...TOWN_BUILDINGS.map((b) => ({
     id: b.id,
     xMin: b.x - b.w * 0.5 - 0.35,
@@ -671,11 +932,14 @@ export function isPositionOnTownRoad(x: number, z: number): boolean {
 }
 
 export function isPositionInMarketOrParkPath(x: number, z: number): boolean {
-  // NE market plaza area
-  if (x >= 8 && x <= 70 && z >= 234 && z <= 286) return true;
-  // Park paved cross paths
-  if (x >= 8 && x <= 70 && z >= 330 && z <= 337) return true;
-  if (x >= 35.5 && x <= 42.5 && z >= 300 && z <= 367) return true;
+  // Market Plaza (Row 0 Col 3)
+  if (x >= 4.5 && x <= 48.5 && z >= 226 && z <= 266) return true;
+  // Botanical Fountain Park paths (Row 1 Col 3)
+  if (x >= 4.5 && x <= 48.5 && z >= 290.5 && z <= 295.5) return true;
+  if (x >= 24.0 && x <= 29.0 && z >= 273 && z <= 313) return true;
+  // South Gazebo Park paths (Row 2 Col 3)
+  if (x >= 4.5 && x <= 48.5 && z >= 336.0 && z <= 341.0) return true;
+  if (x >= 24.0 && x <= 29.0 && z >= 318.5 && z <= 358.5) return true;
   return false;
 }
 
@@ -683,40 +947,35 @@ export function isPositionInMarketOrParkPath(x: number, z: number): boolean {
  * Smooth ground elevation at any world (x, z) coordinate across:
  * - Stadium inner 240x240 field (y = 0)
  * - Stadium concourse apron & South Entrance smooth ramp (z = 120..212)
- * - Town roads / parking lots (y = -0.71) & town ground (y = -0.85)
+ * - Town roads / parking lots (y = -0.71) & uniform block sidewalks (y = -0.64)
  */
 export function getWorldGroundY(x: number, z: number): number {
   const ax = Math.abs(x);
   const az = Math.abs(z);
 
-  // Inside 240x240 grass field / race track
   if (ax <= FIELD_HALF && az <= FIELD_HALF) {
     return 0;
   }
 
-  // Smooth ramp along South Stadium Entrance Corridor (x in [-14, 14], z in [120, 212])
   if (ax <= 14 && z > FIELD_HALF && z <= PARK_HALF) {
-    const t = (z - FIELD_HALF) / (PARK_HALF - FIELD_HALF); // 0 at field edge -> 1 at park edge
+    const t = (z - FIELD_HALF) / (PARK_HALF - FIELD_HALF);
     return t * TOWN_BOUNDS.roadSurfaceY;
   }
 
-  // Town district (z > 212)
   if (z > PARK_HALF) {
     if (isPositionOnTownRoad(x, z)) {
       return TOWN_BOUNDS.roadSurfaceY;
     }
-    if (isPositionInMarketOrParkPath(x, z)) {
-      return TOWN_BOUNDS.sidewalkSurfaceY;
+    for (let i = 0; i < TOWN_BLOCKS.length; i++) {
+      if (isPointInRect(x, z, TOWN_BLOCKS[i])) {
+        return TOWN_BOUNDS.sidewalkSurfaceY;
+      }
     }
     return TOWN_BOUNDS.groundY;
   }
 
-  // Stadium concourse & park apron
   if (ax <= 178 && az <= 178) {
     return -0.35;
-  }
-  if (ax <= PARK_HALF && az <= PARK_HALF) {
-    return -0.85;
   }
   return -0.85;
 }

@@ -8,7 +8,13 @@ import {
   FreeCameraInputState,
   createEmptyFreeCameraInput,
 } from './camera/freeCamera';
-import { CameraMode, TouchControls } from './components/TouchControls';
+import {
+  CameraMode,
+  FollowPerspective,
+  PERSPECTIVE_OPTIONS,
+  PlayerHudInfo,
+  TouchControls,
+} from './components/TouchControls';
 import { RaceHUD } from './components/RaceHUD';
 import {
   RaceState,
@@ -17,13 +23,27 @@ import {
 import type { KartInputState } from './kart/kartPhysics';
 import { GoKartTrackCanvas } from './scene/GoKartTrackCanvas';
 
+const INITIAL_PLAYER_HUD: PlayerHudInfo = {
+  mode: 'walking',
+  activeVehicleId: null,
+  activeVehicleName: null,
+  activeVehicleTagline: null,
+  nearbyVehicleId: 'veh_mega_kart',
+  nearbyVehicleName: 'Apex Mega Kart',
+  nearbyVehicleTagline: 'Oversized Twin-Engine Kart',
+  speedUnits: 0,
+};
+
 export default function App() {
   const [cameraMode, setCameraMode] = useState<CameraMode>('follow');
+  const [perspective, setPerspective] = useState<FollowPerspective>('chase');
   const [spectatorResetTick, setSpectatorResetTick] = useState(0);
   const [restartRaceTick, setRestartRaceTick] = useState(0);
+  const [vehicleInteractTick, setVehicleInteractTick] = useState(0);
   const [raceState, setRaceState] = useState<RaceState>(() =>
     createInitialRaceState(3, 6),
   );
+  const [playerInfo, setPlayerInfo] = useState<PlayerHudInfo>(INITIAL_PLAYER_HUD);
 
   const touchInputRef = useRef<KartInputState>({
     accelerate: false,
@@ -49,6 +69,24 @@ export default function App() {
     setSpectatorResetTick((n) => n + 1);
   }, []);
 
+  const handleSelectPerspective = useCallback((next: FollowPerspective) => {
+    setPerspective(next);
+    setCameraMode('follow');
+  }, []);
+
+  const handleCyclePerspective = useCallback(() => {
+    setPerspective((prev) => {
+      const idx = PERSPECTIVE_OPTIONS.findIndex((o) => o.id === prev);
+      const next = PERSPECTIVE_OPTIONS[(idx + 1) % PERSPECTIVE_OPTIONS.length].id;
+      return next;
+    });
+    setCameraMode('follow');
+  }, []);
+
+  const handleVehicleInteract = useCallback(() => {
+    setVehicleInteractTick((n) => n + 1);
+  }, []);
+
   const handleRestartRace = useCallback(() => {
     setRestartRaceTick((n) => n + 1);
     setRaceState(createInitialRaceState(3, 6));
@@ -56,6 +94,10 @@ export default function App() {
 
   const handleRaceStateChange = useCallback((state: RaceState) => {
     setRaceState(state);
+  }, []);
+
+  const handlePlayerInfoChange = useCallback((info: PlayerHudInfo) => {
+    setPlayerInfo(info);
   }, []);
 
   const handleKartTouchInput = useCallback(
@@ -76,21 +118,35 @@ export default function App() {
     <main className="relative h-screen w-screen overflow-hidden select-none">
       <GoKartTrackCanvas
         cameraMode={cameraMode}
+        perspective={perspective}
         spectatorResetTick={spectatorResetTick}
         restartRaceTick={restartRaceTick}
+        vehicleInteractTick={vehicleInteractTick}
         touchInputRef={touchInputRef}
         freeCamTouchInputRef={freeCamTouchInputRef}
         onRaceStateChange={handleRaceStateChange}
+        onPlayerInfoChange={handlePlayerInfoChange}
+        onSelectPerspective={handleSelectPerspective}
+        onCyclePerspective={handleCyclePerspective}
         onToggleFollow={handleToggleFollow}
         onToggleFreeCam={handleToggleFreeCam}
         onResetSpectator={handleResetSpectator}
       />
-      <RaceHUD raceState={raceState} onRestart={handleRestartRace} />
+      <RaceHUD
+        raceState={raceState}
+        playerInfo={playerInfo}
+        onRestart={handleRestartRace}
+      />
       <TouchControls
         cameraMode={cameraMode}
+        perspective={perspective}
+        playerInfo={playerInfo}
+        onSelectPerspective={handleSelectPerspective}
+        onCyclePerspective={handleCyclePerspective}
         onToggleFollow={handleToggleFollow}
         onToggleFreeCam={handleToggleFreeCam}
         onResetSpectator={handleResetSpectator}
+        onVehicleInteract={handleVehicleInteract}
         onKartInputChange={handleKartTouchInput}
         onFreeCamInputChange={handleFreeCamTouchInput}
       />

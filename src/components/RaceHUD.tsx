@@ -1,8 +1,10 @@
 import type { PointerEvent as ReactPointerEvent } from 'react';
 import type { RaceState } from '../game/raceRules';
+import type { PlayerHudInfo } from './TouchControls';
 
 interface RaceHUDProps {
   raceState: RaceState;
+  playerInfo: PlayerHudInfo;
   onRestart: () => void;
 }
 
@@ -15,7 +17,7 @@ function formatTime(seconds: number): string {
   return `${pad(mins)}:${pad(secs)}.${pad(centi)}`;
 }
 
-export function RaceHUD({ raceState, onRestart }: RaceHUDProps) {
+export function RaceHUD({ raceState, playerInfo, onRestart }: RaceHUDProps) {
   const stopPointer = (e: ReactPointerEvent<HTMLButtonElement>) => {
     e.stopPropagation();
   };
@@ -32,9 +34,11 @@ export function RaceHUD({ raceState, onRestart }: RaceHUDProps) {
             ? '1'
             : 'GO!';
 
+  const speedKmh = Math.round(Math.abs(playerInfo.speedUnits) * 3.6);
+
   return (
     <>
-      {/* Countdown overlay (only triggers after entering Stadium Gate) */}
+      {/* Countdown overlay (only triggers after entering Stadium Gate in a vehicle) */}
       {raceState.status === 'countdown' && (
         <div className="pointer-events-none fixed inset-0 z-30 flex items-center justify-center">
           <div className="flex flex-col items-center">
@@ -51,26 +55,44 @@ export function RaceHUD({ raceState, onRestart }: RaceHUDProps) {
       {/* Compact Top-Left HUD Card (rgba fill, zero backdrop-blur for fast WebGL compositing) */}
       <div
         data-testid="race-hud"
-        className="pointer-events-none fixed top-4 left-4 z-20 flex flex-col gap-1.5 rounded-2xl border border-white/20 bg-[rgba(22,28,36,0.88)] p-3.5 text-white shadow-xl sm:min-w-[230px]"
+        className="pointer-events-none fixed top-13 left-2.5 right-2.5 z-20 flex flex-col gap-1 rounded-2xl border border-white/20 bg-[rgba(22,28,36,0.88)] p-2.5 text-white shadow-xl sm:top-4 sm:left-4 sm:right-auto sm:min-w-[240px] sm:max-w-[330px] sm:gap-1.5 sm:p-3.5"
       >
-        <div className="flex items-center justify-between gap-4 border-b border-white/10 pb-2">
+        <div className="flex items-center justify-between gap-3 border-b border-white/10 pb-1.5">
           <span className="text-xs font-bold uppercase tracking-wider text-sky-400">
             {raceState.status === 'waiting' ? 'Town District' : 'Apex Grand Prix'}
           </span>
           {raceState.status === 'waiting' ? (
-            <span className="rounded bg-emerald-500/25 px-2 py-0.5 text-xs font-extrabold tracking-wide text-emerald-300">
-              Free Roam
+            <span className="text-xs font-bold tracking-wide text-emerald-300 tabular-nums">
+              {playerInfo.mode === 'driving'
+                ? `${playerInfo.activeVehicleName ?? 'Vehicle'} · ${speedKmh} km/h`
+                : 'On Foot · Free Roam'}
             </span>
           ) : (
-            <span className="rounded bg-sky-500/20 px-2 py-0.5 text-xs font-extrabold tracking-wide text-sky-200">
-              Lap {Math.min(raceState.lap, raceState.maxLaps)}/{raceState.maxLaps}
+            <span className="text-xs font-extrabold tracking-wide text-sky-200 tabular-nums">
+              Lap {Math.min(raceState.lap, raceState.maxLaps)}/{raceState.maxLaps} · {speedKmh} km/h
             </span>
           )}
         </div>
 
         {raceState.status === 'waiting' ? (
-          <div className="pt-1 text-xs leading-snug text-white/85">
-            Explore town streets, market &amp; park. Drive north through the Stadium Gate to race!
+          <div className="pt-0.5 text-xs leading-snug text-white/85">
+            {playerInfo.mode === 'walking' ? (
+              playerInfo.nearbyVehicleName ? (
+                <span>
+                  Beside <strong className="text-sky-300">{playerInfo.nearbyVehicleName}</strong>
+                  {' · '}
+                  {playerInfo.nearbyVehicleTagline}. Press <strong className="text-white">E</strong> to drive.
+                </span>
+              ) : (
+                <span>
+                  Walk up to the Mega Kart or any parked car &amp; press <strong className="text-white">E</strong> to drive.
+                </span>
+              )
+            ) : (
+              <span>
+                Driving <strong className="text-emerald-300">{playerInfo.activeVehicleName}</strong>. Head north through the Stadium Gate to race!
+              </span>
+            )}
           </div>
         ) : (
           <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs pt-1 tabular-nums">
@@ -104,6 +126,12 @@ export function RaceHUD({ raceState, onRestart }: RaceHUDProps) {
             </h2>
 
             <div className="my-6 w-full rounded-2xl border border-white/10 bg-white/5 p-4 tabular-nums">
+              <div className="flex justify-between py-1.5 border-b border-white/10 text-sm">
+                <span className="text-white/70">Vehicle</span>
+                <span className="font-bold text-emerald-300">
+                  {playerInfo.activeVehicleName ?? 'Apex Mega Kart'}
+                </span>
+              </div>
               <div className="flex justify-between py-1.5 border-b border-white/10 text-sm">
                 <span className="text-white/70">Total Race Time</span>
                 <span className="font-mono font-bold text-sky-300">

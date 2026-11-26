@@ -4,7 +4,11 @@ import { createTrackCurve, sampleTrackFrames } from '../track/trackLayout';
 import { createInitialKartState, stepKartPhysics } from './kartPhysics';
 import {
   KART_TOWN_SPAWN,
+  TOWN_BLOCKS,
+  TOWN_BUILDINGS,
   TOWN_ROADS,
+  UNIFORM_BLOCK_DEPTH,
+  UNIFORM_BLOCK_WIDTH,
   getWorldGroundY,
   isPositionOnTownRoad,
 } from '../scene/townLayout';
@@ -20,6 +24,29 @@ test('kart spawns on town road facing north (not in stadium)', () => {
   assert.ok(Math.abs(initial.yaw - Math.PI) < 1e-4, 'Kart must face North (-Z) toward stadium');
 });
 
+test('every town block shares the exact same uniform width and depth measurements', () => {
+  assert.equal(TOWN_BLOCKS.length, 24);
+  for (const blk of TOWN_BLOCKS) {
+    const w = Math.round((blk.xMax - blk.xMin) * 1000) / 1000;
+    const d = Math.round((blk.zMax - blk.zMin) * 1000) / 1000;
+    assert.equal(w, UNIFORM_BLOCK_WIDTH, `Block ${blk.id} width expected ${UNIFORM_BLOCK_WIDTH}, got ${w}`);
+    assert.equal(d, UNIFORM_BLOCK_DEPTH, `Block ${blk.id} depth expected ${UNIFORM_BLOCK_DEPTH}, got ${d}`);
+  }
+});
+
+test('all town buildings fit strictly inside uniform blocks without blocking roads', () => {
+  for (const b of TOWN_BUILDINGS) {
+    const bx1 = b.x - b.w * 0.5;
+    const bx2 = b.x + b.w * 0.5;
+    const bz1 = b.z - b.d * 0.5;
+    const bz2 = b.z + b.d * 0.5;
+    const insideBlock = TOWN_BLOCKS.some(
+      (blk) => bx1 >= blk.xMin && bx2 <= blk.xMax && bz1 >= blk.zMin && bz2 <= blk.zMax,
+    );
+    assert.ok(insideBlock, `Building ${b.id} must sit cleanly inside a uniform block`);
+  }
+});
+
 test('kart drives freely along town road and straight through open South Stadium Gate without walls', () => {
   const curve = createTrackCurve();
   const frames = sampleTrackFrames(curve, 240);
@@ -32,9 +59,9 @@ test('kart drives freely along town road and straight through open South Stadium
     steerRight: false,
   };
 
-  // Drive north along Main Avenue from z = 318 straight through South Gate (z = 150) onto track (z < 110)
+  // Drive north along Main Avenue straight through South Gate (z = 150) onto track spur (z in [99, 120])
   let passedGateSpeed = 0;
-  for (let i = 0; i < 190; i++) {
+  for (let i = 0; i < 152; i++) {
     state = stepKartPhysics(state, driveInput, 0.05, frames);
     if (state.z < 150 && passedGateSpeed === 0) {
       passedGateSpeed = state.speed;

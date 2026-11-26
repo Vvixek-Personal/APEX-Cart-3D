@@ -28,24 +28,32 @@ export interface KartState {
   onTrack: boolean;     // True when on race track OR town paved road/parking lot
 }
 
-export const KART_PHYSICS = {
-  maxForwardSpeed: 26,
-  maxReverseSpeed: 9,
-  offTrackMaxSpeed: 11.5,
-  plazaMaxSpeed: 21,
-  accelRate: 22,
-  reverseAccelRate: 15,
-  brakeRate: 40,
+import type { VehiclePhysicsStats } from './vehicleCatalog';
+
+export const KART_PHYSICS: VehiclePhysicsStats & {
+  worldMinX: number;
+  worldMaxX: number;
+  worldMinZ: number;
+  worldMaxZ: number;
+} = {
+  maxForwardSpeed: 28,
+  maxReverseSpeed: 10,
+  offTrackMaxSpeed: 12.5,
+  plazaMaxSpeed: 22,
+  accelRate: 24,
+  reverseAccelRate: 16,
+  brakeRate: 42,
   coastDrag: 9.5,
-  offTrackDrag: 28,
-  maxTurnRate: 2.3,
-  steerResponseRate: 12,
-  kartRadius: 0.92,
+  offTrackDrag: 26,
+  maxTurnRate: 2.38,
+  steerResponseRate: 12.5,
+  kartRadius: 1.38,
+  wheelRadius: 0.42,
   worldMinX: -174,
   worldMaxX: 174,
   worldMinZ: -196,
   worldMaxZ: 416,
-} as const;
+};
 
 /**
  * Spawns the player kart on the Main Avenue road in the Town District,
@@ -142,14 +150,21 @@ export function isPositionOnDrivableAsphalt(
   return isPositionOnTrack(x, z, frames) || isPositionOnTownRoad(x, z);
 }
 
+export interface DynamicCircleObstacle {
+  x: number;
+  z: number;
+  radius: number;
+}
+
 /**
  * Resolves smooth circle-vs-AABB collisions against town buildings, park features,
- * and stadium stand walls so the kart slides cleanly without getting stuck.
+ * and stadium stand walls so the vehicle slides cleanly without getting stuck.
  */
-function resolveStaticCollisions(
+export function resolveStaticCollisions(
   x: number,
   z: number,
   radius: number,
+  dynamicObstacles?: ReadonlyArray<DynamicCircleObstacle>,
 ): { x: number; z: number; collided: boolean } {
   let rx = x;
   let rz = z;
@@ -185,23 +200,46 @@ function resolveStaticCollisions(
         }
       }
     }
+
+    if (dynamicObstacles) {
+      for (let i = 0; i < dynamicObstacles.length; i++) {
+        const obs = dynamicObstacles[i];
+        const minDist = radius + obs.radius;
+        const dx = rx - obs.x;
+        const dz = rz - obs.z;
+        const distSq = dx * dx + dz * dz;
+        if (distSq < minDist * minDist) {
+          collided = true;
+          if (distSq > 1e-8) {
+            const dist = Math.sqrt(distSq);
+            const push = minDist - dist;
+            rx += (dx / dist) * push;
+            rz += (dz / dist) * push;
+          } else {
+            rx += minDist;
+          }
+        }
+      }
+    }
   }
 
   return { x: rx, z: rz, collided };
 }
 
 /**
- * Advances the kart physics by rawDt seconds using smooth arcade controls:
+ * Advances vehicle physics by rawDt seconds using smooth arcade controls:
  * - Full speed on race track, town roads, and parking lots
  * - Slightly moderated speed on market plazas / park paved paths
  * - Grass speed reduction when driving onto turf (fully recoverable)
- * - Smooth sliding collision against buildings, stands, and park monuments
+ * - Smooth sliding collision against buildings, stands, park monuments, and parked vehicles
  */
 export function stepKartPhysics(
   state: KartState,
   input: KartInputState,
   rawDt: number,
   frames: ReadonlyArray<TrackFrame>,
+  stats: VehiclePhysicsStats = KART_PHYSICS,
+  dynamicObstacles?: ReadonlyArray<DynamicCircleObstacle>,
 ): KartState {
   const dt = Math.min(Math.max(rawDt, 0), 0.05);
   if (dt === 0) return state;
@@ -209,35 +247,35 @@ export function stepKartPhysics(
   const onAsphalt = isPositionOnDrivableAsphalt(state.x, state.z, frames);
   const onPlazaPath = !onAsphalt && isPositionInMarketOrParkPath(state.x, state.z);
   const topSpeed = onAsphalt
-    ? KART_PHYSICS.maxForwardSpeed
+    ? stats.maxForwardSpeed
     : onPlazaPath
-      ? KART_PHYSICS.plazaMaxSpeed
-      : KART_PHYSICS.offTrackMaxSpeed;
+      ? stats.plazaMaxSpeed
+      : stats.offTrackMaxSpeed;
 
   let speed = state.speed;
 
   // Throttle & Brake / Reverse
   if (input.accelerate && !input.brakeReverse) {
     if (speed < 0) {
-      speed = Math.min(0, speed + KART_PHYSICS.brakeRate * dt);
+      speed = Math.min(0, speed + stats.brakeRate * dt);
     } else if (speed < topSpeed) {
-      speed = Math.min(topSpeed, speed + KART_PHYSICS.accelRate * dt);
+      speed = Math.min(topSpeed, speed + stats.accelRate * dt);
     } else if (!onAsphalt) {
-      speed = Math.max(topSpeed, speed - KART_PHYSICS.offTrackDrag * dt);
+      speed = Math.max(topSpeed, speed - stats.offTrackDrag * dt);
     }
   } else if (input.brakeReverse && !input.accelerate) {
     if (speed > 0) {
-      speed = Math.max(0, speed - KART_PHYSICS.brakeRate * dt);
+      speed = Math.max(0, speed - stats.brakeRate * dt);
     } else {
       const maxRev = onAsphalt || onPlazaPath
-        ? KART_PHYSICS.maxReverseSpeed
-        : KART_PHYSICS.maxReverseSpeed * 0.65;
-      speed = Math.max(-maxRev, speed - KART_PHYSICS.reverseAccelRate * dt);
+        ? stats.maxReverseSpeed
+        : stats.maxReverseSpeed * 0.65;
+      speed = Math.max(-maxRev, speed - stats.reverseAccelRate * dt);
     }
   } else {
     const drag = onAsphalt || onPlazaPath
-      ? KART_PHYSICS.coastDrag
-      : KART_PHYSICS.offTrackDrag * 0.75;
+      ? stats.coastDrag
+      : stats.offTrackDrag * 0.75;
     if (speed > 0) {
       speed = Math.max(0, speed - drag * dt);
     } else if (speed < 0) {
@@ -247,7 +285,7 @@ export function stepKartPhysics(
 
   // Smooth steering input
   const rawSteer = (input.steerLeft ? 1 : 0) - (input.steerRight ? 1 : 0);
-  const steerBlend = 1 - Math.exp(-KART_PHYSICS.steerResponseRate * dt);
+  const steerBlend = 1 - Math.exp(-stats.steerResponseRate * dt);
   const steerAngle = state.steerAngle + (rawSteer - state.steerAngle) * steerBlend;
 
   // Speed-responsive steering along heading
@@ -258,23 +296,23 @@ export function stepKartPhysics(
       : THREE.MathUtils.clamp(absSpeed / 7.5, 0.22, 1.0) *
         (1.0 - 0.14 * THREE.MathUtils.clamp((absSpeed - 14) / 12, 0, 1));
   const reverseSign = speed >= 0 ? 1 : -1;
-  const yaw = state.yaw + steerAngle * KART_PHYSICS.maxTurnRate * speedSteerFactor * reverseSign * dt;
+  const yaw = state.yaw + steerAngle * stats.maxTurnRate * speedSteerFactor * reverseSign * dt;
 
-  // Move along kart heading
+  // Move along vehicle heading
   const forwardX = Math.sin(yaw);
   const forwardZ = Math.cos(yaw);
   let nextX = state.x + forwardX * speed * dt;
   let nextZ = state.z + forwardZ * speed * dt;
 
-  // Resolve building / stadium wall collisions smoothly
-  const resolved = resolveStaticCollisions(nextX, nextZ, KART_PHYSICS.kartRadius);
+  // Resolve building / stadium wall / parked vehicle collisions smoothly
+  const resolved = resolveStaticCollisions(nextX, nextZ, stats.kartRadius, dynamicObstacles);
   nextX = resolved.x;
   nextZ = resolved.z;
   if (resolved.collided) {
     speed *= 0.72;
   }
 
-  // Keep kart inside the full town + stadium playable world
+  // Keep vehicle inside the full town + stadium playable world
   if (nextX < KART_PHYSICS.worldMinX) {
     nextX = KART_PHYSICS.worldMinX;
     speed *= 0.6;
@@ -291,7 +329,7 @@ export function stepKartPhysics(
   }
 
   const nextOnTrack = isPositionOnDrivableAsphalt(nextX, nextZ, frames) || isPositionInMarketOrParkPath(nextX, nextZ);
-  const wheelSpin = state.wheelSpin + (speed * dt) / 0.24;
+  const wheelSpin = state.wheelSpin + (speed * dt) / Math.max(0.15, stats.wheelRadius);
 
   return {
     x: nextX,
