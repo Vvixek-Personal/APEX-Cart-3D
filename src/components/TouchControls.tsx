@@ -1,5 +1,5 @@
 import type { PointerEvent as ReactPointerEvent } from 'react';
-import { useRef } from 'react';
+import { useEffect, useRef } from 'react';
 import type { FreeCameraInputState } from '../camera/freeCamera';
 import type { KartInputState } from '../kart/kartPhysics';
 import type { PlayerControlMode } from '../player/characterPhysics';
@@ -18,6 +18,10 @@ export const PERSPECTIVE_OPTIONS: ReadonlyArray<{
   { id: 'wide', label: 'Wide', shortLabel: 'Wide' },
 ];
 
+export type TouchActionInputState = KartInputState & {
+  sprint: boolean;
+};
+
 export interface PlayerHudInfo {
   mode: PlayerControlMode;
   activeVehicleId: string | null;
@@ -27,19 +31,30 @@ export interface PlayerHudInfo {
   nearbyVehicleName: string | null;
   nearbyVehicleTagline: string | null;
   speedUnits: number;
+  gear?: number;
+  rpmNorm?: number;
+  isDrifting?: boolean;
+  driftCharge?: number;
+  boostTimer?: number;
+  isOffTrack?: boolean;
+  posX?: number;
+  posZ?: number;
+  heading?: number;
 }
 
 interface TouchControlsProps {
   cameraMode: CameraMode;
   perspective: FollowPerspective;
   playerInfo: PlayerHudInfo;
+  isMuted: boolean;
+  onToggleMute: () => void;
   onSelectPerspective: (perspective: FollowPerspective) => void;
   onCyclePerspective: () => void;
   onToggleFollow: () => void;
   onToggleFreeCam: () => void;
   onResetSpectator: () => void;
   onVehicleInteract: () => void;
-  onKartInputChange: (key: keyof KartInputState, pressed: boolean) => void;
+  onKartInputChange: (key: keyof TouchActionInputState, pressed: boolean) => void;
   onFreeCamInputChange: (key: keyof FreeCameraInputState, pressed: boolean) => void;
 }
 
@@ -59,6 +74,22 @@ function HoldButton<K extends string>({
   children,
 }: HoldButtonProps<K>) {
   const activePointers = useRef<Set<number>>(new Set());
+  const latestKeyRef = useRef(inputKey);
+  const latestCallbackRef = useRef(onInputChange);
+  latestKeyRef.current = inputKey;
+  latestCallbackRef.current = onInputChange;
+
+  // Release any held input cleanly if unmounted or if inputKey swaps (e.g. sprint <-> drift)
+  useEffect(() => {
+    const keyAtMount = inputKey;
+    const pointers = activePointers.current;
+    return () => {
+      if (pointers.size > 0) {
+        pointers.clear();
+        latestCallbackRef.current(keyAtMount, false);
+      }
+    };
+  }, [inputKey]);
 
   const press = (e: ReactPointerEvent<HTMLButtonElement>) => {
     e.preventDefault();
@@ -102,6 +133,8 @@ export function TouchControls({
   cameraMode,
   perspective,
   playerInfo,
+  isMuted,
+  onToggleMute,
   onSelectPerspective,
   onCyclePerspective,
   onToggleFollow,
@@ -127,8 +160,62 @@ export function TouchControls({
       className="pointer-events-none fixed inset-0 z-10 flex flex-col justify-between p-2.5 sm:p-5"
       style={{ touchAction: 'none' }}
     >
-      {/* Top bar: perspective selector + camera mode & reset controls (single compact row on mobile) */}
+      {/* Top bar: perspective selector + audio + camera mode & reset controls */}
       <div className="flex items-center justify-end gap-1.5 sm:gap-2 overflow-x-auto no-scrollbar">
+        {/* Sound mute/unmute button */}
+        <button
+          type="button"
+          onClick={onToggleMute}
+          onPointerDown={stopCanvasPointer}
+          aria-label="Toggle sound"
+          aria-pressed={!isMuted}
+          data-testid="mute-audio-btn"
+          style={{ touchAction: 'none' }}
+          className={`pointer-events-auto whitespace-nowrap shrink-0 select-none flex items-center gap-1.5 rounded-xl border px-2.5 py-1.5 sm:px-3 sm:py-2 text-xs sm:text-sm font-semibold text-white shadow-md active:scale-95 transition-transform duration-75 ${
+            isMuted
+              ? 'border-rose-300/50 bg-[rgba(127,29,29,0.86)] hover:bg-[rgba(153,27,27,0.92)]'
+              : 'border-white/25 bg-[rgba(22,28,36,0.84)] hover:bg-[rgba(30,38,49,0.92)]'
+          }`}
+        >
+          {isMuted ? (
+            <svg
+              width="15"
+              height="15"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2.2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden="true"
+            >
+              <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
+              <line x1="23" y1="9" x2="17" y2="15" />
+              <line x1="17" y1="9" x2="23" y2="15" />
+            </svg>
+          ) : (
+            <svg
+              width="15"
+              height="15"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2.2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden="true"
+            >
+              <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
+              <path d="M15.54 8.46a5 5 0 0 1 0 7.07" />
+              <path d="M19.07 4.93a10 10 0 0 1 0 14.14" />
+            </svg>
+          )}
+          <span className="hidden sm:inline">{isMuted ? 'Muted' : 'Sound'}</span>
+          <span className="hidden lg:inline-block rounded bg-white/15 px-1.5 py-0.5 text-xs font-bold tracking-wide text-white/90">
+            M
+          </span>
+        </button>
+
         {/* Desktop segmented perspective switcher */}
         <div
           role="group"
@@ -175,12 +262,14 @@ export function TouchControls({
           <span>POV: {currentPerspectiveMeta.shortLabel}</span>
         </button>
 
-        {cameraMode === 'free' && (
+        {/* Spectator / Free-Cam Reset button (available in both Free Cam & Spectator so touch orbit drag can reset) */}
+        {(cameraMode === 'free' || cameraMode === 'spectator') && (
           <button
             type="button"
             onClick={onResetSpectator}
             onPointerDown={stopCanvasPointer}
             aria-label="Return to default spectator view"
+            data-testid="reset-spectator-btn"
             style={{ touchAction: 'none' }}
             className="pointer-events-auto whitespace-nowrap shrink-0 select-none flex items-center gap-1.5 rounded-xl border border-white/25 bg-[rgba(22,28,36,0.84)] px-2.5 py-1.5 sm:px-3 sm:py-2 text-xs sm:text-sm font-semibold text-white shadow-md hover:bg-[rgba(30,38,49,0.92)] active:scale-95 transition-transform duration-75"
           >
@@ -301,8 +390,8 @@ export function TouchControls({
           <div className="hidden lg:flex justify-center pb-1">
             <div className="rounded-lg border border-white/15 bg-[rgba(22,28,36,0.78)] px-3.5 py-1.5 text-xs font-medium text-white/90 shadow">
               {isWalking
-                ? 'WASD/Arrows: Walk & Turn · Shift: Sprint · E: Drive Nearby Car · P or 1-4: Perspectives · C: Aerial · V: Free Cam'
-                : 'WASD/Arrows: Drive · E: Exit Car · P or 1-4: Perspectives · C: Aerial · V: Free Cam'}
+                ? 'WASD/Arrows: Walk & Turn · Shift: Sprint · E: Drive Nearby Car · P/1-4: POV · M: Mute · C: Aerial · V: Free Cam'
+                : 'WASD/Arrows: Drive · Space: Handbrake Drift · E: Exit Car · P/1-4: POV · M: Mute · C: Aerial · V: Free Cam'}
             </div>
           </div>
         )}
@@ -455,12 +544,12 @@ export function TouchControls({
             data-testid="kart-touch-controls"
           >
             {/* Left: Steering / Turning buttons */}
-            <div className="flex items-center gap-2.5 sm:gap-3">
+            <div className="flex items-center gap-2 sm:gap-3">
               <HoldButton
                 label={isWalking ? 'Turn Left' : 'Steer Left'}
                 inputKey="steerLeft"
                 onInputChange={onKartInputChange}
-                className="h-15 w-15 sm:h-20 sm:w-20 border-white/30 bg-[rgba(22,28,36,0.82)] text-white active:bg-[#2a3442]"
+                className="h-14 w-14 sm:h-20 sm:w-20 border-white/30 bg-[rgba(22,28,36,0.82)] text-white active:bg-[#2a3442]"
               >
                 <svg
                   width="30"
@@ -480,7 +569,7 @@ export function TouchControls({
                 label={isWalking ? 'Turn Right' : 'Steer Right'}
                 inputKey="steerRight"
                 onInputChange={onKartInputChange}
-                className="h-15 w-15 sm:h-20 sm:w-20 border-white/30 bg-[rgba(22,28,36,0.82)] text-white active:bg-[#2a3442]"
+                className="h-14 w-14 sm:h-20 sm:w-20 border-white/30 bg-[rgba(22,28,36,0.82)] text-white active:bg-[#2a3442]"
               >
                 <svg
                   width="30"
@@ -498,13 +587,29 @@ export function TouchControls({
               </HoldButton>
             </div>
 
-            {/* Right: Back/Brake & Walk/Gas buttons */}
-            <div className="flex items-center gap-2.5 sm:gap-3">
+            {/* Right: Sprint/Drift + Back/Brake + Walk/Gas buttons */}
+            <div className="flex items-end gap-2 sm:gap-3">
+              <HoldButton
+                label={isWalking ? 'Sprint' : 'Handbrake Drift'}
+                inputKey={isWalking ? 'sprint' : 'drift'}
+                onInputChange={onKartInputChange}
+                className={`h-14 w-13 sm:h-16 sm:w-16 text-white ${
+                  isWalking
+                    ? 'border-sky-300/45 bg-[rgba(2,132,199,0.86)] active:bg-[#0ea5e9]'
+                    : 'border-amber-300/55 bg-[rgba(217,119,6,0.88)] active:bg-[#f59e0b]'
+                }`}
+              >
+                <div className="flex flex-col items-center leading-tight">
+                  <span className="text-[11px] font-black uppercase tracking-wider">
+                    {isWalking ? 'Run' : 'Drift'}
+                  </span>
+                </div>
+              </HoldButton>
               <HoldButton
                 label={isWalking ? 'Walk Backward' : 'Brake or Reverse'}
                 inputKey="brakeReverse"
                 onInputChange={onKartInputChange}
-                className="h-15 w-15 sm:h-20 sm:w-20 border-amber-300/40 bg-[rgba(184,50,39,0.88)] text-white active:bg-[#d63e32]"
+                className="h-14 w-14 sm:h-20 sm:w-20 border-amber-300/40 bg-[rgba(184,50,39,0.88)] text-white active:bg-[#d63e32]"
               >
                 <div className="flex flex-col items-center">
                   <svg
@@ -529,7 +634,7 @@ export function TouchControls({
                 label={isWalking ? 'Walk Forward' : 'Accelerate'}
                 inputKey="accelerate"
                 onInputChange={onKartInputChange}
-                className="h-15 w-15 sm:h-20 sm:w-20 border-emerald-300/45 bg-[rgba(32,139,58,0.9)] text-white active:bg-[#29a848]"
+                className="h-14 w-14 sm:h-20 sm:w-20 border-emerald-300/45 bg-[rgba(32,139,58,0.9)] text-white active:bg-[#29a848]"
               >
                 <div className="flex flex-col items-center">
                   <svg

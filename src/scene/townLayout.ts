@@ -1,4 +1,11 @@
-import { FIELD_HALF, PARK_HALF } from '../track/trackLayout';
+import {
+  BANNER_POST_OFFSET,
+  FIELD_HALF,
+  PARK_HALF,
+  STADIUM_TOWER_OFFSET,
+  createTrackCurve,
+  getBannerPlacements,
+} from '../track/trackLayout';
 import { TOWN_PALETTE } from './townSculptor';
 
 export interface TownRoadRect {
@@ -882,6 +889,41 @@ export const TOWN_MARKET_STALLS: ReadonlyArray<MarketStallSpec> = [
   { id: 'stall_12', x: 26.5, z: 373.0, yaw: 0, canopyColorA: TOWN_PALETTE.awningMint, canopyColorB: TOWN_PALETTE.awningCream, goodsType: 'flowers' },
 ];
 
+const _bannerCurve = createTrackCurve();
+const _banners = getBannerPlacements(_bannerCurve);
+const _bannerPostColliders: TownColliderBox[] = (['start', 'finish'] as const).flatMap((key) => {
+  const placement = _banners[key];
+  return ([-1, 1] as const).map((side) => {
+    const px = placement.position.x + placement.normal.x * side * BANNER_POST_OFFSET;
+    const pz = placement.position.z + placement.normal.z * side * BANNER_POST_OFFSET;
+    return {
+      id: `banner_${key}_post_${side < 0 ? 'inner' : 'outer'}`,
+      xMin: px - 0.65,
+      xMax: px + 0.65,
+      zMin: pz - 0.65,
+      zMax: pz + 0.65,
+    };
+  });
+});
+
+const _floodlightColliders: TownColliderBox[] = (
+  [
+    [-STADIUM_TOWER_OFFSET, -STADIUM_TOWER_OFFSET, 'nw'],
+    [STADIUM_TOWER_OFFSET, -STADIUM_TOWER_OFFSET, 'ne'],
+    [-STADIUM_TOWER_OFFSET, STADIUM_TOWER_OFFSET, 'sw'],
+    [STADIUM_TOWER_OFFSET, STADIUM_TOWER_OFFSET, 'se'],
+  ] as const
+).map(([tx, tz, tag]) => ({
+  id: `floodlight_tower_${tag}`,
+  xMin: tx - 3.5,
+  xMax: tx + 3.5,
+  zMin: tz - 3.5,
+  zMax: tz + 3.5,
+}));
+
+export const STADIUM_CONCOURSE_HALF = 178;
+export const STADIUM_CONCOURSE_Y = -0.35;
+
 export const TOWN_COLLIDERS: ReadonlyArray<TownColliderBox> = [
   // Stadium Stand Colliders (leaving South Gate x in [-13.5, 13.5] wide open!)
   { id: 'stadium_north_stand', xMin: -104, xMax: 104, zMin: -176, zMax: -127 },
@@ -889,6 +931,24 @@ export const TOWN_COLLIDERS: ReadonlyArray<TownColliderBox> = [
   { id: 'stadium_east_pavilion', xMin: 131, xMax: 164, zMin: -66, zMax: 66 },
   { id: 'stadium_south_west_wing', xMin: -90, xMax: -13.5, zMin: 130, zMax: 154 },
   { id: 'stadium_south_east_wing', xMin: 13.5, xMax: 90, zMin: 130, zMax: 154 },
+  // South Stadium Entrance Archway Piers (x = +-14.2, z = 150.2)
+  { id: 'stadium_south_arch_west', xMin: -15.6, xMax: -12.8, zMin: 148.0, zMax: 152.4 },
+  { id: 'stadium_south_arch_east', xMin: 12.8, xMax: 15.6, zMin: 148.0, zMax: 152.4 },
+  // Town Welcome Archway Piers at z = PARK_HALF (212), clear of Main Ave [-4.5, 4.5]
+  { id: 'town_welcome_arch_west', xMin: -7.7, xMax: -5.3, zMin: PARK_HALF - 1.2, zMax: PARK_HALF + 1.2 },
+  { id: 'town_welcome_arch_east', xMin: 5.3, xMax: 7.7, zMin: PARK_HALF - 1.2, zMax: PARK_HALF + 1.2 },
+  // Overhead START & FINISH Gantry Posts (strictly outside asphalt track edges)
+  ..._bannerPostColliders,
+  // 4 Corner Floodlight Towers
+  ..._floodlightColliders,
+  // Stadium Scoreboard & Timing Display Pylon
+  { id: 'stadium_scoreboard_nw', xMin: -131.5, xMax: -116.5, zMin: -149.5, zMax: -134.5 },
+  { id: 'stadium_timing_pylon', xMin: 133.8, xMax: 138.2, zMin: 81.8, zMax: 86.2 },
+  // Town Kiosks, ATMs & Bus Shelter
+  { id: 'parking_ticket_kiosk', xMin: -8.6, xMax: -5.8, zMin: 244.4, zMax: 247.6 },
+  { id: 'atm_kiosk_east', xMin: 6.4, xMax: 8.0, zMin: 245.2, zMax: 246.8 },
+  { id: 'atm_kiosk_west', xMin: -8.0, xMax: -6.4, zMin: 275.7, zMax: 277.3 },
+  { id: 'west_bus_shelter', xMin: -48.2, xMax: -46.2, zMin: 335.7, zMax: 341.3 },
   // Central Botanical Fountain Park (Row 1 Col 3 center: x=26.5, z=293)
   { id: 'central_park_fountain', xMin: 21.8, xMax: 31.2, zMin: 288.3, zMax: 297.7 },
   // South Park Timber Gazebo (Row 2 Col 3 center: x=26.5, z=338.5)
@@ -974,8 +1034,38 @@ export function getWorldGroundY(x: number, z: number): number {
     return TOWN_BOUNDS.groundY;
   }
 
-  if (ax <= 178 && az <= 178) {
-    return -0.35;
+  if (ax <= STADIUM_CONCOURSE_HALF && az <= STADIUM_CONCOURSE_HALF) {
+    return STADIUM_CONCOURSE_Y;
   }
-  return -0.85;
+  return TOWN_BOUNDS.groundY;
+}
+
+/**
+ * Samples local ground pitch (positive = nose up) and roll (positive = right side down)
+ * along a vehicle's heading `yaw` so vehicles align naturally to ramps and curbs.
+ */
+export function getWorldGroundSlope(
+  x: number,
+  z: number,
+  yaw: number,
+  wheelbaseHalf = 1.6,
+  trackHalf = 1.05,
+): { pitch: number; roll: number } {
+  const fwdX = Math.sin(yaw);
+  const fwdZ = Math.cos(yaw);
+  const sideX = Math.cos(yaw);
+  const sideZ = -Math.sin(yaw);
+
+  const yFront = getWorldGroundY(x + fwdX * wheelbaseHalf, z + fwdZ * wheelbaseHalf);
+  const yRear = getWorldGroundY(x - fwdX * wheelbaseHalf, z - fwdZ * wheelbaseHalf);
+  const yLeft = getWorldGroundY(x + sideX * trackHalf, z + sideZ * trackHalf);
+  const yRight = getWorldGroundY(x - sideX * trackHalf, z - sideZ * trackHalf);
+
+  // In Three.js local +Z forward, negative rotation.x pitches nose (+Z) upward
+  const pitch = -Math.atan2(yFront - yRear, wheelbaseHalf * 2);
+  const roll = Math.atan2(yLeft - yRight, trackHalf * 2);
+  return {
+    pitch: Math.max(-0.18, Math.min(0.18, pitch)),
+    roll: Math.max(-0.14, Math.min(0.14, roll)),
+  };
 }

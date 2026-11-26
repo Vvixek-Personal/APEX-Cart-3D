@@ -3,12 +3,15 @@ import { VEHICLE_CATALOG, VehicleSpec } from './vehicleCatalog';
 
 export interface KartMeshRig {
   group: THREE.Group;
+  chassisGroup: THREE.Group;
   frontLeftPivot: THREE.Group;
   frontRightPivot: THREE.Group;
   wheels: THREE.Mesh[];
   driverGroup: THREE.Group;
   driverHead: THREE.Group;
+  steeringWheel: THREE.Object3D | null;
   highlightRing: THREE.Mesh;
+  setBrakeLights: (braking: boolean, active?: boolean) => void;
   dispose: () => void;
 }
 
@@ -88,7 +91,7 @@ function createSeatedDriver(
 /**
  * Builds an oversized, sculpted 3D vehicle rig (Big Mega Kart, Sports GT,
  * Formula Arrow, Rally Hatch, or Street Cruiser) pivoted at bottom-center (y = 0)
- * and facing local +Z.
+ * and facing local +Z, with articulated suspension chassis, spoked wheels, and active brake lights.
  */
 export function buildVehicleMesh(
   spec: VehicleSpec,
@@ -108,7 +111,7 @@ export function buildVehicleMesh(
     map: contactShadowTexture,
     transparent: true,
     depthWrite: false,
-    opacity: 0.45,
+    opacity: 0.48,
   });
   const shadowMesh = new THREE.Mesh(shadowGeo, shadowMat);
   shadowMesh.position.set(0, 0.015, 0);
@@ -133,21 +136,21 @@ export function buildVehicleMesh(
   geometries.push(ringGeo);
   materials.push(ringMat);
 
-  // Shared PBR material palette per vehicle
+  // Shared PBR material palette per vehicle (polished clearcoat-like automotive sheen)
   const bodyPaintMat = new THREE.MeshStandardMaterial({
     color: spec.primaryColor,
-    roughness: 0.24,
-    metalness: 0.22,
+    roughness: 0.19,
+    metalness: 0.32,
   });
   const accentMat = new THREE.MeshStandardMaterial({
     color: spec.accentColor,
-    roughness: 0.3,
-    metalness: 0.12,
+    roughness: 0.28,
+    metalness: 0.16,
   });
   const chassisMat = new THREE.MeshStandardMaterial({
     color: 0x222730,
-    roughness: 0.68,
-    metalness: 0.34,
+    roughness: 0.64,
+    metalness: 0.38,
   });
   const seatMat = new THREE.MeshStandardMaterial({
     color: 0x171b22,
@@ -155,38 +158,38 @@ export function buildVehicleMesh(
     metalness: 0.05,
   });
   const tireMat = new THREE.MeshStandardMaterial({
-    color: 0x1b1f25,
-    roughness: 0.88,
-    metalness: 0.04,
+    color: 0x181c22,
+    roughness: 0.86,
+    metalness: 0.05,
   });
   const hubMat = new THREE.MeshStandardMaterial({
     color: spec.rimColor,
-    roughness: 0.26,
-    metalness: 0.78,
+    roughness: 0.24,
+    metalness: 0.82,
   });
   const chromeMat = new THREE.MeshStandardMaterial({
     color: 0xdce3ec,
-    roughness: 0.18,
-    metalness: 0.88,
+    roughness: 0.16,
+    metalness: 0.9,
   });
   const glassMat = new THREE.MeshStandardMaterial({
     color: 0x7dd3fc,
-    roughness: 0.12,
-    metalness: 0.35,
+    roughness: 0.09,
+    metalness: 0.42,
     transparent: true,
-    opacity: 0.62,
+    opacity: 0.64,
   });
   const headlightMat = new THREE.MeshStandardMaterial({
     color: 0xfef9c3,
     emissive: 0xfde047,
-    emissiveIntensity: 0.45,
-    roughness: 0.2,
+    emissiveIntensity: 0.35,
+    roughness: 0.18,
   });
   const taillightMat = new THREE.MeshStandardMaterial({
     color: 0xef4444,
     emissive: 0xdc2626,
-    emissiveIntensity: 0.5,
-    roughness: 0.25,
+    emissiveIntensity: 0.3,
+    roughness: 0.22,
   });
   materials.push(
     bodyPaintMat,
@@ -201,30 +204,48 @@ export function buildVehicleMesh(
     taillightMat,
   );
 
+  // Spoke bar geometry shared per wheel size so rotational motion reads clearly
   const wheels: THREE.Mesh[] = [];
   const createWheelAssembly = (
     tireGeo: THREE.BufferGeometry,
     hubGeo: THREE.BufferGeometry,
+    spokeRadius: number,
+    wheelWidth: number,
   ): THREE.Mesh => {
     const tire = new THREE.Mesh(tireGeo, tireMat);
     tire.castShadow = true;
     tire.receiveShadow = true;
     const hub = new THREE.Mesh(hubGeo, hubMat);
     tire.add(hub);
+
+    const spokeGeoA = new THREE.BoxGeometry(wheelWidth + 0.035, spokeRadius * 1.72, spokeRadius * 0.24);
+    const spokeGeoB = new THREE.BoxGeometry(wheelWidth + 0.035, spokeRadius * 0.24, spokeRadius * 1.72);
+    geometries.push(spokeGeoA, spokeGeoB);
+    const spokeA = new THREE.Mesh(spokeGeoA, chassisMat);
+    const spokeB = new THREE.Mesh(spokeGeoB, chassisMat);
+    tire.add(spokeA, spokeB);
+
     wheels.push(tire);
     return tire;
   };
 
   const frontLeftPivot = new THREE.Group();
   const frontRightPivot = new THREE.Group();
+
+  // Sprung chassis group tilts cleanly on suspension springs without lifting tires or shadow
+  const chassisGroup = new THREE.Group();
+  chassisGroup.position.set(0, 0.32, 0);
+  group.add(chassisGroup);
+
   const bodyGroup = new THREE.Group();
-  group.add(bodyGroup);
+  bodyGroup.position.set(0, -0.32, 0);
+  chassisGroup.add(bodyGroup);
 
   let driverGroup: THREE.Group;
   let driverHead: THREE.Group;
+  let steeringWheel: THREE.Object3D | null = null;
 
   if (spec.bodyStyle === 'kart') {
-    // Oversized ~1.92x Mega Kart so it commands attention on town streets & track!
     const KART_SCALE = 1.92;
     bodyGroup.scale.setScalar(KART_SCALE);
 
@@ -283,7 +304,6 @@ export function buildVehicleMesh(
     bodyGroup.add(frontBumper);
     geometries.push(frontBumperGeo);
 
-    // Twin front mini headlights on big bumper
     const hlGeo = new THREE.BoxGeometry(0.14, 0.08, 0.06);
     geometries.push(hlGeo);
     for (const side of [-0.36, 0.36]) {
@@ -299,7 +319,15 @@ export function buildVehicleMesh(
     bodyGroup.add(rearBumper);
     geometries.push(rearBumperGeo);
 
-    // Rear roll hoop + spoiler wing for big kart presence
+    // Twin rear LED brake light pods on Mega Kart rear bumper
+    const brakePodGeo = new THREE.BoxGeometry(0.22, 0.09, 0.06);
+    geometries.push(brakePodGeo);
+    for (const side of [-0.44, 0.44]) {
+      const tl = new THREE.Mesh(brakePodGeo, taillightMat);
+      tl.position.set(side, 0.28, -1.17);
+      bodyGroup.add(tl);
+    }
+
     const wingPillarGeo = new THREE.BoxGeometry(0.06, 0.36, 0.12);
     geometries.push(wingPillarGeo);
     for (const side of [-0.34, 0.34]) {
@@ -336,12 +364,17 @@ export function buildVehicleMesh(
     bodyGroup.add(colMesh);
     geometries.push(colGeo);
 
+    const wheelPivot = new THREE.Group();
+    wheelPivot.position.set(0, 0.68, 0.24);
+    wheelPivot.rotation.x = -0.6;
     const wheelRimGeo = new THREE.TorusGeometry(0.16, 0.03, 10, 20);
     const wheelRim = new THREE.Mesh(wheelRimGeo, seatMat);
-    wheelRim.position.set(0, 0.68, 0.24);
-    wheelRim.rotation.x = -0.6;
-    bodyGroup.add(wheelRim);
-    geometries.push(wheelRimGeo);
+    const wheelSpokeGeo = new THREE.BoxGeometry(0.3, 0.04, 0.025);
+    const wheelSpoke = new THREE.Mesh(wheelSpokeGeo, chromeMat);
+    wheelPivot.add(wheelRim, wheelSpoke);
+    bodyGroup.add(wheelPivot);
+    steeringWheel = wheelPivot;
+    geometries.push(wheelRimGeo, wheelSpokeGeo);
 
     const engineGeo = new THREE.BoxGeometry(0.4, 0.3, 0.4);
     const engineMesh = new THREE.Mesh(engineGeo, chassisMat);
@@ -372,28 +405,27 @@ export function buildVehicleMesh(
     geometries.push(frontTireGeo, frontHubGeo, rearTireGeo, rearHubGeo);
 
     frontLeftPivot.position.set(0.65 * KART_SCALE, 0.23 * KART_SCALE, 0.74 * KART_SCALE);
-    frontLeftPivot.add(createWheelAssembly(frontTireGeo, frontHubGeo));
+    frontLeftPivot.add(createWheelAssembly(frontTireGeo, frontHubGeo, 0.12 * KART_SCALE, 0.22 * KART_SCALE));
     group.add(frontLeftPivot);
 
     frontRightPivot.position.set(-0.65 * KART_SCALE, 0.23 * KART_SCALE, 0.74 * KART_SCALE);
-    frontRightPivot.add(createWheelAssembly(frontTireGeo, frontHubGeo));
+    frontRightPivot.add(createWheelAssembly(frontTireGeo, frontHubGeo, 0.12 * KART_SCALE, 0.22 * KART_SCALE));
     group.add(frontRightPivot);
 
-    const rearLeftWheel = createWheelAssembly(rearTireGeo, rearHubGeo);
+    const rearLeftWheel = createWheelAssembly(rearTireGeo, rearHubGeo, 0.14 * KART_SCALE, 0.31 * KART_SCALE);
     rearLeftWheel.position.set(0.69 * KART_SCALE, 0.27 * KART_SCALE, -0.7 * KART_SCALE);
     group.add(rearLeftWheel);
 
-    const rearRightWheel = createWheelAssembly(rearTireGeo, rearHubGeo);
+    const rearRightWheel = createWheelAssembly(rearTireGeo, rearHubGeo, 0.14 * KART_SCALE, 0.31 * KART_SCALE);
     rearRightWheel.position.set(-0.69 * KART_SCALE, 0.27 * KART_SCALE, -0.7 * KART_SCALE);
     group.add(rearRightWheel);
 
     const dvr = createSeatedDriver(geometries, materials, 1.38);
     driverGroup = dvr.driverGroup;
     driverHead = dvr.driverHead;
-    driverGroup.position.set(0, 0.56, -0.26);
-    group.add(driverGroup);
+    driverGroup.position.set(0, 0.56 - 0.32, -0.26);
+    chassisGroup.add(driverGroup);
   } else if (spec.bodyStyle === 'formula') {
-    // Open-wheel Formula GP car (~2.6m wide x 4.9m long)
     const tubGeo = new THREE.BoxGeometry(1.06, 0.44, 3.6);
     const tub = new THREE.Mesh(tubGeo, bodyPaintMat);
     tub.position.set(0, 0.54, 0.05);
@@ -432,11 +464,29 @@ export function buildVehicleMesh(
     bodyGroup.add(airbox);
     geometries.push(airboxGeo);
 
+    // Formula cockpit steering yoke
+    const yokePivot = new THREE.Group();
+    yokePivot.position.set(0, 0.86, 0.32);
+    yokePivot.rotation.x = -0.35;
+    const yokeGeo = new THREE.BoxGeometry(0.34, 0.18, 0.04);
+    const yokeMesh = new THREE.Mesh(yokeGeo, seatMat);
+    yokePivot.add(yokeMesh);
+    bodyGroup.add(yokePivot);
+    steeringWheel = yokePivot;
+    geometries.push(yokeGeo);
+
     const rWingPillarGeo = new THREE.BoxGeometry(0.08, 0.55, 0.28);
     const rWingPillar = new THREE.Mesh(rWingPillarGeo, chassisMat);
     rWingPillar.position.set(0, 0.85, -1.96);
     bodyGroup.add(rWingPillar);
     geometries.push(rWingPillarGeo);
+
+    // FIA rear rain / brake light beacon
+    const fiaBrakeGeo = new THREE.BoxGeometry(0.18, 0.22, 0.08);
+    const fiaBrake = new THREE.Mesh(fiaBrakeGeo, taillightMat);
+    fiaBrake.position.set(0, 0.54, -2.08);
+    bodyGroup.add(fiaBrake);
+    geometries.push(fiaBrakeGeo);
 
     const rWingGeo = new THREE.BoxGeometry(2.15, 0.1, 0.42);
     const rWing = new THREE.Mesh(rWingGeo, accentMat);
@@ -458,26 +508,25 @@ export function buildVehicleMesh(
     geometries.push(frontTireGeo, frontHubGeo, rearTireGeo, rearHubGeo);
 
     frontLeftPivot.position.set(1.06, 0.4, 1.48);
-    frontLeftPivot.add(createWheelAssembly(frontTireGeo, frontHubGeo));
+    frontLeftPivot.add(createWheelAssembly(frontTireGeo, frontHubGeo, 0.22, 0.34));
     group.add(frontLeftPivot);
 
     frontRightPivot.position.set(-1.06, 0.4, 1.48);
-    frontRightPivot.add(createWheelAssembly(frontTireGeo, frontHubGeo));
+    frontRightPivot.add(createWheelAssembly(frontTireGeo, frontHubGeo, 0.22, 0.34));
     group.add(frontRightPivot);
 
-    const rl = createWheelAssembly(rearTireGeo, rearHubGeo);
+    const rl = createWheelAssembly(rearTireGeo, rearHubGeo, 0.24, 0.46);
     rl.position.set(1.08, 0.44, -1.42);
-    const rr = createWheelAssembly(rearTireGeo, rearHubGeo);
+    const rr = createWheelAssembly(rearTireGeo, rearHubGeo, 0.24, 0.46);
     rr.position.set(-1.08, 0.44, -1.42);
     group.add(rl, rr);
 
     const dvr = createSeatedDriver(geometries, materials, 1.15);
     driverGroup = dvr.driverGroup;
     driverHead = dvr.driverHead;
-    driverGroup.position.set(0, 0.48, -0.05);
-    group.add(driverGroup);
+    driverGroup.position.set(0, 0.48 - 0.32, -0.05);
+    chassisGroup.add(driverGroup);
   } else {
-    // Full-sized sculpted cars: 'sport', 'rally', or 'cruiser' (~2.38m wide x 4.65m long)
     const isCruiser = spec.bodyStyle === 'cruiser';
     const isRally = spec.bodyStyle === 'rally';
     const bodyW = isCruiser ? 2.38 : 2.32;
@@ -492,14 +541,12 @@ export function buildVehicleMesh(
     bodyGroup.add(lowerMesh);
     geometries.push(lowerGeo);
 
-    // Racing hood stripe
     const stripeGeo = new THREE.BoxGeometry(0.38, 0.04, bodyL * 0.88);
     const stripe = new THREE.Mesh(stripeGeo, accentMat);
     stripe.position.set(0, 0.34 + lowerH + 0.015, 0.08);
     bodyGroup.add(stripe);
     geometries.push(stripeGeo);
 
-    // Front & rear bumpers
     const bumperGeo = new THREE.BoxGeometry(bodyW + 0.08, 0.24, 0.24);
     geometries.push(bumperGeo);
     const fBump = new THREE.Mesh(bumperGeo, chassisMat);
@@ -508,7 +555,6 @@ export function buildVehicleMesh(
     rBump.position.set(0, 0.36, -bodyL * 0.5 - 0.05);
     bodyGroup.add(fBump, rBump);
 
-    // Headlights & Taillights
     const lightGeo = new THREE.BoxGeometry(0.42, 0.16, 0.08);
     geometries.push(lightGeo);
     for (const side of [-0.78, 0.78]) {
@@ -519,7 +565,6 @@ export function buildVehicleMesh(
       bodyGroup.add(hl, tl);
     }
 
-    // Greenhouse / Cabin
     const cabW = bodyW - 0.28;
     const cabL = isCruiser ? 2.75 : isRally ? 2.25 : 2.1;
     const cabH = isCruiser ? 0.72 : 0.58;
@@ -539,7 +584,6 @@ export function buildVehicleMesh(
     geometries.push(glassGeo);
 
     if (spec.bodyStyle === 'sport' || isRally) {
-      // Rear GT / Rally wing
       const wingStayGeo = new THREE.BoxGeometry(0.08, 0.28, 0.18);
       geometries.push(wingStayGeo);
       for (const side of [-0.66, 0.66]) {
@@ -557,7 +601,6 @@ export function buildVehicleMesh(
     }
 
     if (isRally) {
-      // Roof air scoop
       const scoopGeo = new THREE.BoxGeometry(0.44, 0.14, 0.52);
       const scoop = new THREE.Mesh(scoopGeo, accentMat);
       scoop.position.set(0, 0.34 + lowerH + cabH + 0.04, 0.2);
@@ -566,7 +609,6 @@ export function buildVehicleMesh(
     }
 
     if (isCruiser) {
-      // Roof luggage rails
       const railGeo = new THREE.BoxGeometry(0.08, 0.08, 2.1);
       geometries.push(railGeo);
       for (const side of [-0.72, 0.72]) {
@@ -576,7 +618,6 @@ export function buildVehicleMesh(
       }
     }
 
-    // 4 chunky wheels
     const wRad = spec.stats.wheelRadius;
     const tireGeo = new THREE.CylinderGeometry(wRad, wRad, 0.34, 18);
     tireGeo.rotateZ(Math.PI / 2);
@@ -588,34 +629,40 @@ export function buildVehicleMesh(
     const axleZ = bodyL * 0.32;
 
     frontLeftPivot.position.set(trackHalfW, wRad, axleZ);
-    frontLeftPivot.add(createWheelAssembly(tireGeo, hubGeo));
+    frontLeftPivot.add(createWheelAssembly(tireGeo, hubGeo, wRad * 0.56, 0.34));
     group.add(frontLeftPivot);
 
     frontRightPivot.position.set(-trackHalfW, wRad, axleZ);
-    frontRightPivot.add(createWheelAssembly(tireGeo, hubGeo));
+    frontRightPivot.add(createWheelAssembly(tireGeo, hubGeo, wRad * 0.56, 0.34));
     group.add(frontRightPivot);
 
-    const rl = createWheelAssembly(tireGeo, hubGeo);
+    const rl = createWheelAssembly(tireGeo, hubGeo, wRad * 0.56, 0.34);
     rl.position.set(trackHalfW, wRad, -axleZ);
-    const rr = createWheelAssembly(tireGeo, hubGeo);
+    const rr = createWheelAssembly(tireGeo, hubGeo, wRad * 0.56, 0.34);
     rr.position.set(-trackHalfW, wRad, -axleZ);
     group.add(rl, rr);
 
     const dvr = createSeatedDriver(geometries, materials, 1.0);
     driverGroup = dvr.driverGroup;
     driverHead = dvr.driverHead;
-    driverGroup.position.set(0.32, 0.78, 0.05);
-    group.add(driverGroup);
+    driverGroup.position.set(0.32, 0.78 - 0.32, 0.05);
+    chassisGroup.add(driverGroup);
   }
 
   return {
     group,
+    chassisGroup,
     frontLeftPivot,
     frontRightPivot,
     wheels,
     driverGroup,
     driverHead,
+    steeringWheel,
     highlightRing,
+    setBrakeLights: (braking: boolean, active = true) => {
+      headlightMat.emissiveIntensity = active ? 0.65 : 0.2;
+      taillightMat.emissiveIntensity = braking ? 2.4 : active ? 0.5 : 0.2;
+    },
     dispose: () => {
       geometries.forEach((g) => g.dispose());
       materials.forEach((m) => m.dispose());

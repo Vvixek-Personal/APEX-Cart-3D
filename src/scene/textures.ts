@@ -5,6 +5,7 @@ export interface ProceduralTextureSet {
   grassRoughness: THREE.CanvasTexture;
   asphaltColor: THREE.CanvasTexture;
   asphaltRoughness: THREE.CanvasTexture;
+  kerbStripe: THREE.CanvasTexture;
   startBanner: THREE.CanvasTexture;
   finishBanner: THREE.CanvasTexture;
   finishStrip: THREE.CanvasTexture;
@@ -119,22 +120,60 @@ function createAsphaltAlbedoTexture(maxAnisotropy: number): THREE.CanvasTexture 
   canvas.height = size;
   const ctx = canvas.getContext('2d')!;
 
-  // Clean stylized dark slate asphalt (smooth and readable from distance)
-  ctx.fillStyle = '#363c46';
+  // Rich dark slate tarmac with subtle rubbered-in racing groove down center
+  ctx.fillStyle = '#333943';
+  ctx.fillRect(0, 0, size, size);
+
+  const grooveGrad = ctx.createLinearGradient(0, 0, size, 0);
+  grooveGrad.addColorStop(0, 'rgba(72, 80, 92, 0.22)');
+  grooveGrad.addColorStop(0.24, 'rgba(34, 39, 47, 0.14)');
+  grooveGrad.addColorStop(0.5, 'rgba(20, 24, 30, 0.26)');
+  grooveGrad.addColorStop(0.76, 'rgba(34, 39, 47, 0.14)');
+  grooveGrad.addColorStop(1, 'rgba(72, 80, 92, 0.22)');
+  ctx.fillStyle = grooveGrad;
   ctx.fillRect(0, 0, size, size);
 
   const rand = seededRand(303);
-  for (let i = 0; i < 3200; i++) {
+  for (let i = 0; i < 3800; i++) {
     const x = rand() * size;
     const y = rand() * size;
-    const shade = 44 + Math.floor(rand() * 26);
-    ctx.fillStyle = `rgba(${shade}, ${shade + 4}, ${shade + 10}, 0.35)`;
+    const shade = 40 + Math.floor(rand() * 30);
+    ctx.fillStyle = `rgba(${shade}, ${shade + 4}, ${shade + 9}, 0.34)`;
     ctx.fillRect(x, y, 2, 2);
   }
 
   const tex = new THREE.CanvasTexture(canvas);
   tex.colorSpace = THREE.SRGBColorSpace;
   tex.wrapS = THREE.RepeatWrapping;
+  tex.wrapT = THREE.RepeatWrapping;
+  tex.anisotropy = maxAnisotropy;
+  return tex;
+}
+
+function createKerbStripeTexture(maxAnisotropy: number): THREE.CanvasTexture {
+  const w = 64;
+  const h = 256;
+  const canvas = document.createElement('canvas');
+  canvas.width = w;
+  canvas.height = h;
+  const ctx = canvas.getContext('2d')!;
+
+  // Alternating FIA red & crisp white concrete kerb blocks along V
+  ctx.fillStyle = '#dc2626';
+  ctx.fillRect(0, 0, w, h / 2);
+  ctx.fillStyle = '#f8fafc';
+  ctx.fillRect(0, h / 2, w, h / 2);
+
+  // Subtle concrete joint & inner bevel highlight
+  ctx.fillStyle = 'rgba(15, 23, 42, 0.22)';
+  ctx.fillRect(0, h / 2 - 3, w, 6);
+  ctx.fillRect(0, h - 3, w, 3);
+  ctx.fillStyle = 'rgba(255, 255, 255, 0.18)';
+  ctx.fillRect(6, 0, 8, h);
+
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.wrapS = THREE.ClampToEdgeWrapping;
   tex.wrapT = THREE.RepeatWrapping;
   tex.anisotropy = maxAnisotropy;
   return tex;
@@ -670,6 +709,7 @@ export function createProceduralTextures(maxAnisotropy: number): ProceduralTextu
   const grassRoughness = createGrassRoughnessTexture(maxAnisotropy);
   const asphaltColor = createAsphaltAlbedoTexture(maxAnisotropy);
   const asphaltRoughness = createAsphaltRoughnessTexture(maxAnisotropy);
+  const kerbStripe = createKerbStripeTexture(maxAnisotropy);
   const startBanner = createBannerSignTexture('START', maxAnisotropy);
   const finishBanner = createBannerSignTexture('FINISH', maxAnisotropy);
   const finishStrip = createFinishStripTexture(maxAnisotropy);
@@ -688,6 +728,7 @@ export function createProceduralTextures(maxAnisotropy: number): ProceduralTextu
     grassRoughness,
     asphaltColor,
     asphaltRoughness,
+    kerbStripe,
     startBanner,
     finishBanner,
     finishStrip,
@@ -705,6 +746,7 @@ export function createProceduralTextures(maxAnisotropy: number): ProceduralTextu
       grassRoughness.dispose();
       asphaltColor.dispose();
       asphaltRoughness.dispose();
+      kerbStripe.dispose();
       startBanner.dispose();
       finishBanner.dispose();
       finishStrip.dispose();

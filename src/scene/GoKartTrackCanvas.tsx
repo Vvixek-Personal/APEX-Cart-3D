@@ -1,13 +1,38 @@
 import type { MutableRefObject } from 'react';
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+import {
+  ProceduralSoundEngine,
+  computeSimulatedGearAndRpm,
+} from '../audio/soundEngine';
+import { FollowCameraController } from '../camera/followCamera';
+import {
+  FreeCameraController,
+  FreeCameraInputState,
+  createEmptyFreeCameraInput,
+} from '../camera/freeCamera';
+import { SpectatorCameraController } from '../camera/spectatorCamera';
+import type {
+  CameraMode,
+  FollowPerspective,
+  PlayerHudInfo,
+  TouchActionInputState,
+} from '../components/TouchControls';
+import {
+  RaceState,
+  createInitialRaceState,
+  generateCheckpoints,
+  updateRaceState,
+} from '../game/raceRules';
+import { KeyboardInputTracker } from '../input/playerInput';
 import { KartMeshRig, buildVehicleMesh } from '../kart/buildKartMesh';
 import {
   DynamicCircleObstacle,
   KartInputState,
   KartState,
+  createInitialKartState,
   stepKartPhysics,
 } from '../kart/kartPhysics';
 import {
@@ -26,43 +51,39 @@ import {
   stepCharacterPhysics,
 } from '../player/characterPhysics';
 import {
-  FreeCameraController,
-  FreeCameraInputState,
-  createEmptyFreeCameraInput,
-} from '../camera/freeCamera';
-import { SpectatorCameraController } from '../camera/spectatorCamera';
-import {
   createTrackCurve,
   getBannerPlacements,
   sampleTrackFrames,
 } from '../track/trackLayout';
-import {
-  RaceState,
-  createInitialRaceState,
-  generateCheckpoints,
-  updateRaceState,
-} from '../game/raceRules';
-import type {
-  CameraMode,
-  FollowPerspective,
-  PlayerHudInfo,
-} from '../components/TouchControls';
 import { buildTrackBanners } from './buildBanners';
-import { buildStadiumArchitecture } from './buildStadium';
+import { buildCheckpointMarkers } from './buildCheckpoints';
 import { buildMarketDistrict } from './buildMarketDistrict';
-import { getWorldGroundY } from './townLayout';
+import { buildStadiumArchitecture } from './buildStadium';
 import { buildTrackEnvironment } from './buildTrackMesh';
 import { createProceduralTextures } from './textures';
+import { getWorldGroundSlope, getWorldGroundY } from './townLayout';
+import { VehicleEffectsSystem } from './vehicleEffects';
+
+let cachedSoftwareWebGL: boolean | null = null;
 
 function detectSoftwareWebGL(): boolean {
-  const probe = document.createElement('canvas');
-  const gl = probe.getContext('webgl2');
-  if (!gl) return true;
-  const ext = gl.getExtension('WEBGL_debug_renderer_info');
-  const param = ext ? ext.UNMASKED_RENDERER_WEBGL : gl.RENDERER;
-  const gpu = String(gl.getParameter(param));
-  gl.getExtension('WEBGL_lose_context')?.loseContext();
-  return /SwiftShader|llvmpipe|softpipe|Software|Basic Render/i.test(gpu);
+  if (cachedSoftwareWebGL !== null) return cachedSoftwareWebGL;
+  try {
+    const probe = document.createElement('canvas');
+    const gl = probe.getContext('webgl2');
+    if (!gl) {
+      cachedSoftwareWebGL = true;
+      return true;
+    }
+    const ext = gl.getExtension('WEBGL_debug_renderer_info');
+    const param = ext ? ext.UNMASKED_RENDERER_WEBGL : gl.RENDERER;
+    const gpu = String(gl.getParameter(param));
+    gl.getExtension('WEBGL_lose_context')?.loseContext();
+    cachedSoftwareWebGL = /SwiftShader|llvmpipe|softpipe|Software|Basic Render/i.test(gpu);
+  } catch {
+    cachedSoftwareWebGL = true;
+  }
+  return cachedSoftwareWebGL;
 }
 
 function createAtmosphericEffects(scene: THREE.Scene): () => void {
@@ -93,10 +114,15 @@ function createAtmosphericEffects(scene: THREE.Scene): () => void {
   const cloudCount = 20;
   const cloudGeo = new THREE.BufferGeometry();
   const cloudPositions = new Float32Array(cloudCount * 3);
+  let seed = 7717;
+  const nextRand = () => {
+    seed = (seed * 1664525 + 1013904223) >>> 0;
+    return seed / 4294967296;
+  };
   for (let i = 0; i < cloudCount; i++) {
-    cloudPositions[i * 3] = (Math.random() - 0.5) * 1500;
-    cloudPositions[i * 3 + 1] = 290 + Math.random() * 80;
-    cloudPositions[i * 3 + 2] = (Math.random() - 0.5) * 1500;
+    cloudPositions[i * 3] = (nextRand() - 0.5) * 1500;
+    cloudPositions[i * 3 + 1] = 290 + nextRand() * 80;
+    cloudPositions[i * 3 + 2] = (nextRand() - 0.5) * 1500;
   }
   cloudGeo.setAttribute('position', new THREE.BufferAttribute(cloudPositions, 3));
 
@@ -134,13 +160,6 @@ function createAtmosphericEffects(scene: THREE.Scene): () => void {
   };
 }
 
-// Pre-allocated scratch math objects to keep the render loop GC-free
-const _desiredCamPos = new THREE.Vector3();
-const _desiredCamTarget = new THREE.Vector3();
-const _targetPos = new THREE.Vector3();
-const _forwardVec = new THREE.Vector3();
-const _sideVec = new THREE.Vector3();
-
 interface WorldVehicle {
   instanceId: string;
   spec: VehicleSpec;
@@ -151,10 +170,11 @@ interface WorldVehicle {
 interface GoKartTrackCanvasProps {
   cameraMode: CameraMode;
   perspective: FollowPerspective;
+  isMuted: boolean;
   spectatorResetTick: number;
   restartRaceTick: number;
   vehicleInteractTick: number;
-  touchInputRef: MutableRefObject<KartInputState>;
+  touchInputRef: MutableRefObject<TouchActionInputState>;
   freeCamTouchInputRef: MutableRefObject<FreeCameraInputState>;
   onRaceStateChange: (state: RaceState) => void;
   onPlayerInfoChange: (info: PlayerHudInfo) => void;
@@ -162,12 +182,14 @@ interface GoKartTrackCanvasProps {
   onCyclePerspective: () => void;
   onToggleFollow: () => void;
   onToggleFreeCam: () => void;
+  onToggleMute: () => void;
   onResetSpectator: () => void;
 }
 
 export function GoKartTrackCanvas({
   cameraMode,
   perspective,
+  isMuted,
   spectatorResetTick,
   restartRaceTick,
   vehicleInteractTick,
@@ -179,14 +201,20 @@ export function GoKartTrackCanvas({
   onCyclePerspective,
   onToggleFollow,
   onToggleFreeCam,
+  onToggleMute,
   onResetSpectator,
 }: GoKartTrackCanvasProps) {
   const containerRef = useRef<HTMLDivElement>(null);
+  const [webglError, setWebglError] = useState<string | null>(null);
+  const [contextLost, setContextLost] = useState(false);
+
   const cameraModeRef = useRef<CameraMode>(cameraMode);
   const perspectiveRef = useRef<FollowPerspective>(perspective);
+  const isMutedRef = useRef<boolean>(isMuted);
   const spectatorResetTickRef = useRef<number>(spectatorResetTick);
   const restartRaceTickRef = useRef<number>(restartRaceTick);
   const vehicleInteractTickRef = useRef<number>(vehicleInteractTick);
+  const soundEngineRef = useRef<ProceduralSoundEngine | null>(null);
 
   const onRaceStateChangeRef = useRef(onRaceStateChange);
   const onPlayerInfoChangeRef = useRef(onPlayerInfoChange);
@@ -194,6 +222,7 @@ export function GoKartTrackCanvas({
   const onCyclePerspectiveRef = useRef(onCyclePerspective);
   const onToggleFollowRef = useRef(onToggleFollow);
   const onToggleFreeCamRef = useRef(onToggleFreeCam);
+  const onToggleMuteRef = useRef(onToggleMute);
   const onResetSpectatorRef = useRef(onResetSpectator);
 
   useEffect(() => {
@@ -209,6 +238,11 @@ export function GoKartTrackCanvas({
       containerRef.current.setAttribute('data-perspective', perspective);
     }
   }, [perspective]);
+
+  useEffect(() => {
+    isMutedRef.current = isMuted;
+    soundEngineRef.current?.setMuted(isMuted);
+  }, [isMuted]);
 
   useEffect(() => {
     spectatorResetTickRef.current = spectatorResetTick;
@@ -247,6 +281,10 @@ export function GoKartTrackCanvas({
   }, [onToggleFreeCam]);
 
   useEffect(() => {
+    onToggleMuteRef.current = onToggleMute;
+  }, [onToggleMute]);
+
+  useEffect(() => {
     onResetSpectatorRef.current = onResetSpectator;
   }, [onResetSpectator]);
 
@@ -259,10 +297,22 @@ export function GoKartTrackCanvas({
     const height = container.clientHeight || window.innerHeight;
     let currentAspect = width / Math.max(height, 1);
 
-    const renderer = new THREE.WebGLRenderer({
-      antialias: !isSoftwareGl,
-      powerPreference: 'high-performance',
-    });
+    let renderer: THREE.WebGLRenderer;
+    try {
+      renderer = new THREE.WebGLRenderer({
+        antialias: !isSoftwareGl,
+        powerPreference: 'high-performance',
+      });
+    } catch (err) {
+      const msg =
+        err instanceof Error
+          ? err.message
+          : 'WebGL 2 graphics context could not be initialized on this device.';
+      container.setAttribute('data-state', 'webgl-error');
+      setWebglError(msg);
+      return;
+    }
+
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
     renderer.toneMappingExposure = 0.96;
@@ -275,6 +325,15 @@ export function GoKartTrackCanvas({
     renderer.domElement.style.height = '100%';
     renderer.domElement.setAttribute('data-testid', 'track-canvas');
     container.appendChild(renderer.domElement);
+
+    const soundEngine = new ProceduralSoundEngine();
+    soundEngine.setMuted(isMutedRef.current);
+    soundEngineRef.current = soundEngine;
+
+    const unlockAudio = () => {
+      soundEngine.unlock();
+    };
+    window.addEventListener('pointerdown', unlockAudio, { passive: true });
 
     const scene = new THREE.Scene();
     const horizonFog = new THREE.Fog(0xcce9fb, 760, 1750);
@@ -319,7 +378,7 @@ export function GoKartTrackCanvas({
 
     const disposeAtmosphere = createAtmosphericEffects(scene);
 
-    // Enlarged 2x track environment, stadium, town district & banners
+    // Track curve, stadium, town district, banners & 3D checkpoint markers
     const curve = createTrackCurve();
     const frames = sampleTrackFrames(curve, 640);
     const bannerPlacements = getBannerPlacements(curve);
@@ -342,6 +401,9 @@ export function GoKartTrackCanvas({
     const trackBuild = buildTrackEnvironment(frames, bannerPlacements, textures);
     scene.add(trackBuild.group);
 
+    const checkpointBuild = buildCheckpointMarkers(checkpoints);
+    scene.add(checkpointBuild.group);
+
     const stadiumBuild = buildStadiumArchitecture(textures);
     scene.add(stadiumBuild.group);
 
@@ -351,29 +413,43 @@ export function GoKartTrackCanvas({
     const bannerBuild = buildTrackBanners(bannerPlacements, textures);
     scene.add(bannerBuild.group);
 
-    // Build all interactive drivable vehicles (oversized Mega Kart + showcase & parking cars)
+    const vehicleEffects = new VehicleEffectsSystem();
+    scene.add(vehicleEffects.group);
+
+    const alignVehiclePose = (v: WorldVehicle) => {
+      const groundY = getWorldGroundY(v.state.x, v.state.z);
+      const slope = getWorldGroundSlope(v.state.x, v.state.z, v.state.yaw);
+
+      v.rig.group.position.set(v.state.x, groundY + 0.03, v.state.z);
+      v.rig.group.rotation.order = 'YXZ';
+      v.rig.group.rotation.set(slope.pitch, v.state.yaw, slope.roll);
+
+      // Suspension squat/dive & lateral roll on chassisGroup
+      v.rig.chassisGroup.rotation.x = v.state.pitchTilt ?? 0;
+      v.rig.chassisGroup.rotation.z = v.state.rollTilt ?? 0;
+      if (v.rig.steeringWheel) {
+        v.rig.steeringWheel.rotation.z = -v.state.steerAngle * 2.1;
+      }
+    };
+
     const createWorldVehicles = (): WorldVehicle[] =>
       TOWN_VEHICLE_SPAWNS.map((spawn) => {
         const spec = VEHICLE_CATALOG[spawn.specId] ?? VEHICLE_CATALOG.big_kart;
         const rig = buildVehicleMesh(spec, textures.contactShadow);
-        const y = getWorldGroundY(spawn.x, spawn.z) + 0.03;
-        rig.group.position.set(spawn.x, y, spawn.z);
-        rig.group.rotation.y = spawn.yaw;
-        scene.add(rig.group);
-        return {
+        const veh: WorldVehicle = {
           instanceId: spawn.instanceId,
           spec,
           rig,
           state: {
+            ...createInitialKartState(),
             x: spawn.x,
             z: spawn.z,
             yaw: spawn.yaw,
-            speed: 0,
-            steerAngle: 0,
-            wheelSpin: 0,
-            onTrack: true,
           },
         };
+        alignVehiclePose(veh);
+        scene.add(rig.group);
+        return veh;
       });
 
     const worldVehicles = createWorldVehicles();
@@ -383,20 +459,17 @@ export function GoKartTrackCanvas({
         const spawn = TOWN_VEHICLE_SPAWNS[i];
         const v = worldVehicles[i];
         v.state = {
+          ...createInitialKartState(),
           x: spawn.x,
           z: spawn.z,
           yaw: spawn.yaw,
-          speed: 0,
-          steerAngle: 0,
-          wheelSpin: 0,
-          onTrack: true,
         };
-        const vy = getWorldGroundY(spawn.x, spawn.z) + 0.03;
-        v.rig.group.position.set(spawn.x, vy, spawn.z);
-        v.rig.group.rotation.y = spawn.yaw;
+        alignVehiclePose(v);
         v.rig.driverGroup.visible = false;
         v.rig.highlightRing.visible = false;
+        v.rig.setBrakeLights(false);
       }
+      vehicleEffects.reset();
     };
 
     // Articulated walkable player character standing on Main Ave beside Mega Kart & cars
@@ -435,9 +508,10 @@ export function GoKartTrackCanvas({
 
     let raceState = createInitialRaceState(3, 6);
 
-    // Camera controllers (Spectator aerial, Free cam, plus Multi-perspective Follow)
+    // Camera controllers (Spectator aerial, Free cam, and Multi-perspective Follow)
     const spectatorCtrl = new SpectatorCameraController();
     const freeCamCtrl = new FreeCameraController();
+    const followCamCtrl = new FollowCameraController();
     const camera = new THREE.PerspectiveCamera(46, currentAspect, 0.4, 4800);
 
     const controls = new OrbitControls(camera, renderer.domElement);
@@ -457,20 +531,22 @@ export function GoKartTrackCanvas({
     );
 
     if (cameraModeRef.current === 'follow') {
-      _targetPos.set(charState.x, initialCharY, charState.z);
-      _forwardVec.set(Math.sin(charState.yaw), 0, Math.cos(charState.yaw));
-      camera.position
-        .copy(_targetPos)
-        .addScaledVector(_forwardVec, -7.4)
-        .setY(initialCharY + 3.45);
-      controls.target
-        .copy(_targetPos)
-        .addScaledVector(_forwardVec, 4.5)
-        .setY(initialCharY + 1.45);
-      camera.fov = 46;
-      camera.near = 0.4;
-      camera.updateProjectionMatrix();
-      camera.lookAt(controls.target);
+      followCamCtrl.update(
+        camera,
+        controls.target,
+        perspectiveRef.current,
+        {
+          mode: 'walking',
+          x: charState.x,
+          y: initialCharY,
+          z: charState.z,
+          yaw: charState.yaw,
+          speed: 0,
+          vehicleSpec: null,
+        },
+        0.016,
+        true,
+      );
     }
 
     freeCamCtrl.syncFromCamera(camera);
@@ -478,8 +554,10 @@ export function GoKartTrackCanvas({
     let specElevDeg = initialPose.elevationDeg;
     let specAzimDeg = initialPose.azimuthDeg;
     let specDist = initialPose.distance;
-    horizonFog.near = cameraModeRef.current === 'follow' ? 620 : Math.max(540, initialPose.distance * 1.12);
-    horizonFog.far = cameraModeRef.current === 'follow' ? 2100 : Math.max(1250, initialPose.distance * 2.02);
+    horizonFog.near =
+      cameraModeRef.current === 'follow' ? 620 : Math.max(540, initialPose.distance * 1.12);
+    horizonFog.far =
+      cameraModeRef.current === 'follow' ? 2100 : Math.max(1250, initialPose.distance * 2.02);
 
     let userMovedOrbit = false;
     let returningToSpectator = false;
@@ -495,42 +573,38 @@ export function GoKartTrackCanvas({
     let lastHudLap = raceState.lap;
     let lastHudCp = raceState.currentCheckpointIndex;
     let lastHudFinished = raceState.isFinished;
+    let lastHudWrongWay = raceState.isWrongWay;
     let lastHudCountdownCeil = Math.ceil(raceState.countdownSeconds);
 
+    // Sound edge-trigger trackers
+    let prevSoundCountdownCeil = -1;
+    let prevSoundStatus = raceState.status;
+    let prevSoundCp = raceState.currentCheckpointIndex;
+    let prevSoundLap = raceState.lap;
+    let prevSoundWrongWay = false;
+
+    // Diff-gated Player HUD state to eliminate idle React re-renders
     let lastPlayerHudSyncAt = 0;
     let lastHudPlayerMode = charState.mode;
     let lastHudActiveVehId: string | null = charState.activeVehicleId;
     let lastHudNearbyVehId: string | null = null;
+    let lastHudSpeed = -999;
+    let lastHudGear = -1;
+    let lastHudDrifting = false;
+    let lastHudDriftBucket = -1;
+    let lastHudBoostActive = false;
+    let lastHudOffTrack = false;
+    let lastHudPosX = -9999;
+    let lastHudPosZ = -9999;
     let nearbyVehRef: WorldVehicle | null = null;
 
-    // Keyboard input states (character/vehicle + free camera)
-    const keyInput: KartInputState = {
-      accelerate: false,
-      brakeReverse: false,
-      steerLeft: false,
-      steerRight: false,
-    };
-    const freeKeyInput: FreeCameraInputState = createEmptyFreeCameraInput();
-    let interactQueued = false;
-
-    const clearAllInputs = () => {
-      keyInput.accelerate = false;
-      keyInput.brakeReverse = false;
-      keyInput.steerLeft = false;
-      keyInput.steerRight = false;
+    const clearAllTouchInputs = () => {
       touchInputRef.current.accelerate = false;
       touchInputRef.current.brakeReverse = false;
       touchInputRef.current.steerLeft = false;
       touchInputRef.current.steerRight = false;
-
-      freeKeyInput.moveForward = false;
-      freeKeyInput.moveBackward = false;
-      freeKeyInput.moveLeft = false;
-      freeKeyInput.moveRight = false;
-      freeKeyInput.rise = false;
-      freeKeyInput.descend = false;
-      freeKeyInput.faster = false;
-      freeKeyInput.slower = false;
+      touchInputRef.current.drift = false;
+      touchInputRef.current.sprint = false;
 
       freeCamTouchInputRef.current.moveForward = false;
       freeCamTouchInputRef.current.moveBackward = false;
@@ -542,157 +616,46 @@ export function GoKartTrackCanvas({
       freeCamTouchInputRef.current.slower = false;
     };
 
+    const keyboardTracker = new KeyboardInputTracker({
+      getCameraMode: () => cameraModeRef.current,
+      onCyclePerspective: () => {
+        soundEngine.unlock();
+        onCyclePerspectiveRef.current();
+      },
+      onSelectPerspective: (p) => {
+        soundEngine.unlock();
+        onSelectPerspectiveRef.current(p);
+      },
+      onToggleFollow: () => {
+        soundEngine.unlock();
+        onToggleFollowRef.current();
+      },
+      onToggleFreeCam: () => {
+        soundEngine.unlock();
+        onToggleFreeCamRef.current();
+      },
+      onResetSpectator: () => {
+        soundEngine.unlock();
+        onResetSpectatorRef.current();
+      },
+      onToggleMute: () => {
+        soundEngine.unlock();
+        onToggleMuteRef.current();
+      },
+    });
+
+    const clearAllInputs = () => {
+      keyboardTracker.clear();
+      clearAllTouchInputs();
+    };
+
     const onKeyDown = (e: KeyboardEvent) => {
-      freeKeyInput.faster = e.shiftKey;
-      freeKeyInput.slower = e.ctrlKey;
-
-      switch (e.code) {
-        case 'KeyW':
-        case 'ArrowUp':
-          e.preventDefault();
-          keyInput.accelerate = true;
-          freeKeyInput.moveForward = true;
-          break;
-        case 'KeyS':
-        case 'ArrowDown':
-          e.preventDefault();
-          keyInput.brakeReverse = true;
-          freeKeyInput.moveBackward = true;
-          break;
-        case 'KeyA':
-        case 'ArrowLeft':
-          e.preventDefault();
-          keyInput.steerLeft = true;
-          freeKeyInput.moveLeft = true;
-          break;
-        case 'KeyD':
-        case 'ArrowRight':
-          e.preventDefault();
-          keyInput.steerRight = true;
-          freeKeyInput.moveRight = true;
-          break;
-        case 'KeyE':
-          if (!e.repeat) {
-            e.preventDefault();
-            interactQueued = true;
-          }
-          break;
-        case 'KeyP':
-          if (!e.repeat) {
-            e.preventDefault();
-            onCyclePerspectiveRef.current();
-          }
-          break;
-        case 'Digit1':
-          if (!e.repeat) {
-            e.preventDefault();
-            onSelectPerspectiveRef.current('chase');
-          }
-          break;
-        case 'Digit2':
-          if (!e.repeat) {
-            e.preventDefault();
-            onSelectPerspectiveRef.current('cockpit');
-          }
-          break;
-        case 'Digit3':
-          if (!e.repeat) {
-            e.preventDefault();
-            onSelectPerspectiveRef.current('hood');
-          }
-          break;
-        case 'Digit4':
-          if (!e.repeat) {
-            e.preventDefault();
-            onSelectPerspectiveRef.current('wide');
-          }
-          break;
-        case 'KeyR':
-          if (cameraModeRef.current === 'free') {
-            e.preventDefault();
-          }
-          freeKeyInput.rise = true;
-          break;
-        case 'KeyF':
-          if (cameraModeRef.current === 'free') {
-            e.preventDefault();
-          }
-          freeKeyInput.descend = true;
-          break;
-        case 'ShiftLeft':
-        case 'ShiftRight':
-          freeKeyInput.faster = true;
-          break;
-        case 'ControlLeft':
-        case 'ControlRight':
-          freeKeyInput.slower = true;
-          break;
-        case 'KeyC':
-          if (!e.repeat) {
-            e.preventDefault();
-            onToggleFollowRef.current();
-          }
-          break;
-        case 'KeyV':
-          if (!e.repeat) {
-            e.preventDefault();
-            onToggleFreeCamRef.current();
-          }
-          break;
-        case 'Home':
-          if (!e.repeat) {
-            e.preventDefault();
-            onResetSpectatorRef.current();
-          }
-          break;
-        case 'Space':
-          e.preventDefault();
-          break;
-      }
+      soundEngine.unlock();
+      keyboardTracker.handleKeyDown(e);
     };
-
     const onKeyUp = (e: KeyboardEvent) => {
-      freeKeyInput.faster = e.shiftKey;
-      freeKeyInput.slower = e.ctrlKey;
-
-      switch (e.code) {
-        case 'KeyW':
-        case 'ArrowUp':
-          keyInput.accelerate = false;
-          freeKeyInput.moveForward = false;
-          break;
-        case 'KeyS':
-        case 'ArrowDown':
-          keyInput.brakeReverse = false;
-          freeKeyInput.moveBackward = false;
-          break;
-        case 'KeyA':
-        case 'ArrowLeft':
-          keyInput.steerLeft = false;
-          freeKeyInput.moveLeft = false;
-          break;
-        case 'KeyD':
-        case 'ArrowRight':
-          keyInput.steerRight = false;
-          freeKeyInput.moveRight = false;
-          break;
-        case 'KeyR':
-          freeKeyInput.rise = false;
-          break;
-        case 'KeyF':
-          freeKeyInput.descend = false;
-          break;
-        case 'ShiftLeft':
-        case 'ShiftRight':
-          freeKeyInput.faster = false;
-          break;
-        case 'ControlLeft':
-        case 'ControlRight':
-          freeKeyInput.slower = false;
-          break;
-      }
+      keyboardTracker.handleKeyUp(e);
     };
-
     const onVisibilityChange = () => {
       if (document.hidden) clearAllInputs();
     };
@@ -817,6 +780,20 @@ export function GoKartTrackCanvas({
       freeCamCtrl.addDolly(dollyDelta);
     };
 
+    let isContextLost = false;
+    const onWebGLContextLost = (e: Event) => {
+      e.preventDefault();
+      isContextLost = true;
+      setContextLost(true);
+    };
+    const onWebGLContextRestored = () => {
+      isContextLost = false;
+      setContextLost(false);
+      clock.getDelta();
+    };
+
+    renderer.domElement.addEventListener('webglcontextlost', onWebGLContextLost);
+    renderer.domElement.addEventListener('webglcontextrestored', onWebGLContextRestored);
     renderer.domElement.addEventListener('contextmenu', onCanvasContextMenu);
     renderer.domElement.addEventListener('mousedown', onCanvasMouseDown);
     renderer.domElement.addEventListener('pointerdown', onCanvasPointerDown);
@@ -877,11 +854,14 @@ export function GoKartTrackCanvas({
     window.addEventListener('resize', onResize);
 
     const clock = new THREE.Clock();
+    let elapsedSimSeconds = 0;
+
     const mergedKartInput: KartInputState = {
       accelerate: false,
       brakeReverse: false,
       steerLeft: false,
       steerRight: false,
+      drift: false,
     };
     const mergedFreeInput: FreeCameraInputState = createEmptyFreeCameraInput();
 
@@ -891,19 +871,19 @@ export function GoKartTrackCanvas({
 
     function afterDraw(cb: () => void) {
       const gl = renderer.getContext() as WebGL2RenderingContext;
-      const sync = gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE, 0);
+      const sync = gl.fenceSync ? gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE, 0) : null;
       gl.flush();
       const poll = () => {
         if (disposed) {
           if (sync) gl.deleteSync(sync);
           return;
         }
-        const state = sync && gl.getSyncParameter(sync, gl.SYNC_STATUS);
+        const state = sync ? gl.getSyncParameter(sync, gl.SYNC_STATUS) : gl.SIGNALED;
         if (state === gl.UNSIGNALED) {
           frameId = window.setTimeout(poll, 5);
         } else {
           if (sync) gl.deleteSync(sync);
-          frameId = window.setTimeout(cb, 80);
+          frameId = window.setTimeout(cb, 50);
         }
       };
       frameId = window.setTimeout(poll, 5);
@@ -941,8 +921,17 @@ export function GoKartTrackCanvas({
     function tick() {
       if (disposed) return;
 
+      if (isContextLost) {
+        frameId = window.setTimeout(tick, 120);
+        return;
+      }
+
+      // Preserve real-time 1.0x simulation speed even on 10-20 FPS software renderers via sub-stepping
       const rawDt = clock.getDelta();
-      const dt = Math.min(rawDt, 0.05);
+      const frameDt = Math.min(rawDt, 0.25);
+      const subSteps = Math.max(1, Math.ceil(frameDt / 0.05));
+      const stepDt = frameDt / subSteps;
+      elapsedSimSeconds += frameDt;
 
       const mode = cameraModeRef.current;
       const activePersp = perspectiveRef.current;
@@ -987,6 +976,11 @@ export function GoKartTrackCanvas({
       if (restartTick !== prevRestartTick) {
         prevRestartTick = restartTick;
         raceState = createInitialRaceState(3, 6);
+        prevSoundStatus = raceState.status;
+        prevSoundCountdownCeil = -1;
+        prevSoundCp = 0;
+        prevSoundLap = 1;
+        prevSoundWrongWay = false;
         resetWorldVehicles();
         charState = createInitialCharacterState();
         const resetY = getWorldGroundY(charState.x, charState.z);
@@ -998,13 +992,12 @@ export function GoKartTrackCanvas({
       }
 
       // Check Enter / Exit vehicle interaction (via KeyE or UI button)
-      const wantsInteract = interactQueued || interactTick !== prevInteractTick;
-      interactQueued = false;
+      const wantsInteract = keyboardTracker.interactQueued || interactTick !== prevInteractTick;
+      keyboardTracker.interactQueued = false;
       prevInteractTick = interactTick;
 
       if (wantsInteract && mode !== 'free' && !raceState.isFinished) {
         if (charState.mode === 'walking') {
-          // Update proximity cache first
           for (let i = 0; i < worldVehicles.length; i++) {
             const v = worldVehicles[i];
             proximityScratch[i].x = v.state.x;
@@ -1023,6 +1016,7 @@ export function GoKartTrackCanvas({
             charRig.group.visible = false;
             targetVeh.rig.driverGroup.visible = true;
             targetVeh.rig.highlightRing.visible = false;
+            soundEngine.playVehicleDoor(true);
             snapFollowNextFrame = true;
           }
         } else if (charState.mode === 'driving') {
@@ -1030,6 +1024,10 @@ export function GoKartTrackCanvas({
           if (activeVeh) {
             activeVeh.state.speed = 0;
             activeVeh.state.steerAngle = 0;
+            activeVeh.state.lateralSpeed = 0;
+            activeVeh.state.isDrifting = false;
+            activeVeh.state.driftCharge = 0;
+            activeVeh.rig.setBrakeLights(false);
             obstacleScratch.length = 0;
             for (let i = 0; i < worldVehicles.length; i++) {
               const other = worldVehicles[i];
@@ -1054,6 +1052,7 @@ export function GoKartTrackCanvas({
             );
             activeVeh.rig.driverGroup.visible = false;
             charRig.group.visible = true;
+            soundEngine.playVehicleDoor(false);
             snapFollowNextFrame = true;
           }
         }
@@ -1065,21 +1064,28 @@ export function GoKartTrackCanvas({
         !raceState.isFinished &&
         mode !== 'free';
 
+      const keyInput = keyboardTracker.kartInput;
+      const freeKeyInput = keyboardTracker.freeInput;
+      const touch = touchInputRef.current;
+
       if (!controlActive) {
         mergedKartInput.accelerate = false;
         mergedKartInput.brakeReverse = false;
         mergedKartInput.steerLeft = false;
         mergedKartInput.steerRight = false;
+        mergedKartInput.drift = false;
       } else {
-        const touch = touchInputRef.current;
         mergedKartInput.accelerate = keyInput.accelerate || touch.accelerate;
         mergedKartInput.brakeReverse = keyInput.brakeReverse || touch.brakeReverse;
         mergedKartInput.steerLeft = keyInput.steerLeft || touch.steerLeft;
         mergedKartInput.steerRight = keyInput.steerRight || touch.steerRight;
+        mergedKartInput.drift = Boolean(keyInput.drift || touch.drift);
       }
 
-      // Step character OR active vehicle physics
       const activeVeh = findVehicleById(charState.activeVehicleId);
+      let fxInput = null;
+
+      // Sub-step physics & race rules for deterministic real-time accuracy
       if (charState.mode === 'driving' && activeVeh) {
         obstacleScratch.length = 0;
         for (let i = 0; i < worldVehicles.length; i++) {
@@ -1093,34 +1099,71 @@ export function GoKartTrackCanvas({
           }
         }
 
-        activeVeh.state = stepKartPhysics(
-          activeVeh.state,
-          mergedKartInput,
-          dt,
-          frames,
-          activeVeh.spec.stats,
-          obstacleScratch,
-        );
+        for (let s = 0; s < subSteps; s++) {
+          activeVeh.state = stepKartPhysics(
+            activeVeh.state,
+            mergedKartInput,
+            stepDt,
+            frames,
+            activeVeh.spec.stats,
+            obstacleScratch,
+          );
+
+          raceState = updateRaceState(
+            raceState,
+            activeVeh.state.x,
+            activeVeh.state.z,
+            activeVeh.state.speed,
+            activeVeh.state.yaw,
+            stepDt,
+            checkpoints,
+            finishPos,
+            finishTangent,
+            {
+              isDriving: true,
+              vehicleName: activeVeh.spec.name,
+              trackFrames: frames,
+            },
+          );
+        }
 
         charState.x = activeVeh.state.x;
         charState.z = activeVeh.state.z;
         charState.yaw = activeVeh.state.yaw;
         charState.speed = activeVeh.state.speed;
 
-        // Hide driver's helmet only in cockpit 1st-person view so view over dash/wheel is unobstructed
         activeVeh.rig.driverGroup.visible = true;
         activeVeh.rig.driverHead.visible = !(mode === 'follow' && activePersp === 'cockpit');
 
-        const vehGroundY = getWorldGroundY(activeVeh.state.x, activeVeh.state.z);
-        activeVeh.rig.group.position.set(activeVeh.state.x, vehGroundY + 0.03, activeVeh.state.z);
-        activeVeh.rig.group.rotation.y = activeVeh.state.yaw;
+        alignVehiclePose(activeVeh);
 
-        const visualSteer = activeVeh.state.steerAngle * 0.42;
+        const visualSteer = activeVeh.state.steerAngle * 0.44;
         activeVeh.rig.frontLeftPivot.rotation.y = visualSteer;
         activeVeh.rig.frontRightPivot.rotation.y = visualSteer;
         for (const w of activeVeh.rig.wheels) {
           w.rotation.x = activeVeh.state.wheelSpin;
         }
+
+        const isBraking =
+          mergedKartInput.brakeReverse ||
+          Boolean(mergedKartInput.drift && Math.abs(activeVeh.state.speed) > 4);
+        activeVeh.rig.setBrakeLights(isBraking);
+
+        const groundY = getWorldGroundY(activeVeh.state.x, activeVeh.state.z);
+        fxInput = {
+          x: activeVeh.state.x,
+          y: groundY,
+          z: activeVeh.state.z,
+          yaw: activeVeh.state.yaw,
+          speed: activeVeh.state.speed,
+          lateralSpeed: activeVeh.state.lateralSpeed ?? 0,
+          isDrifting: Boolean(activeVeh.state.isDrifting),
+          braking: isBraking,
+          onAsphalt: activeVeh.state.onTrack,
+          boostActive: (activeVeh.state.boostTimer ?? 0) > 0.02,
+          rearTrackHalfWidth: activeVeh.spec.stats.kartRadius * 0.62,
+          rearAxleOffset: activeVeh.spec.stats.kartRadius * 0.72,
+        };
 
         nearbyVehRef = null;
         for (let i = 0; i < worldVehicles.length; i++) {
@@ -1141,14 +1184,35 @@ export function GoKartTrackCanvas({
           proximityScratch[i].yaw = v.state.yaw;
         }
 
-        const sprint = freeKeyInput.faster;
-        charState = stepCharacterPhysics(
-          charState,
-          mergedKartInput,
-          sprint,
-          dt,
-          obstacleScratch,
-        );
+        const sprint = freeKeyInput.faster || touch.sprint;
+        for (let s = 0; s < subSteps; s++) {
+          charState = stepCharacterPhysics(
+            charState,
+            mergedKartInput,
+            sprint,
+            stepDt,
+            obstacleScratch,
+          );
+
+          if (raceState.status === 'racing' || raceState.status === 'countdown') {
+            // Advance race clock while preventing on-foot checkpoint/finish exploits
+            raceState = updateRaceState(
+              raceState,
+              charState.x,
+              charState.z,
+              0,
+              charState.yaw,
+              stepDt,
+              checkpoints,
+              finishPos,
+              finishTangent,
+              {
+                isDriving: false,
+                trackFrames: frames,
+              },
+            );
+          }
+        }
 
         const charGroundY = getWorldGroundY(charState.x, charState.z);
         charRig.group.position.set(charState.x, charGroundY, charState.z);
@@ -1165,7 +1229,7 @@ export function GoKartTrackCanvas({
         );
         nearbyVehRef = near ? near.vehicle.ref : null;
 
-        const pulse = 1 + 0.05 * Math.sin(performance.now() * 0.006);
+        const pulse = 1 + 0.05 * Math.sin(elapsedSimSeconds * 6.0);
         for (let i = 0; i < worldVehicles.length; i++) {
           const v = worldVehicles[i];
           const isNear = nearbyVehRef === v;
@@ -1176,65 +1240,139 @@ export function GoKartTrackCanvas({
         }
       }
 
-      // Race state machine (triggers only when driving a vehicle through the Stadium Gate!)
-      if (charState.mode === 'driving' && activeVeh) {
-        raceState = updateRaceState(
-          raceState,
-          activeVeh.state.x,
-          activeVeh.state.z,
-          activeVeh.state.speed,
-          activeVeh.state.yaw,
-          dt,
-          checkpoints,
-          finishPos,
-          finishTangent,
-        );
-      } else if (raceState.status === 'racing' || raceState.status === 'countdown') {
-        // Keep race timer advancing cleanly if player momentarily steps out mid-race
-        raceState = updateRaceState(
-          raceState,
-          charState.x,
-          charState.z,
-          0,
-          charState.yaw,
-          dt,
-          checkpoints,
-          finishPos,
-          finishTangent,
-        );
-      }
+      // Step visual FX, animated checkpoint beacon & park fountain
+      vehicleEffects.update(fxInput, frameDt);
+      checkpointBuild.updateActiveCheckpoint(
+        raceState.currentCheckpointIndex,
+        raceState.status === 'racing',
+        elapsedSimSeconds,
+      );
+      marketBuild.update(elapsedSimSeconds);
 
-      // Sync React HUD state efficiently
-      const nowMs = performance.now();
+      // Update procedural motorsport & world audio
       const cdCeil = Math.ceil(raceState.countdownSeconds);
+      if (raceState.status === 'countdown' && cdCeil !== prevSoundCountdownCeil && cdCeil >= 1 && cdCeil <= 3) {
+        prevSoundCountdownCeil = cdCeil;
+        soundEngine.playCountdownBeep(false);
+      }
+      if (prevSoundStatus === 'countdown' && raceState.status === 'racing') {
+        soundEngine.playCountdownBeep(true);
+      }
+      if (raceState.status === 'racing') {
+        if (raceState.isFinished && prevSoundStatus !== 'finished') {
+          soundEngine.playFinishFanfare();
+        } else if (raceState.lap > prevSoundLap) {
+          soundEngine.playLapChime();
+        } else if (raceState.currentCheckpointIndex > prevSoundCp) {
+          soundEngine.playCheckpointChime();
+        }
+        if (raceState.isWrongWay && !prevSoundWrongWay) {
+          soundEngine.playWrongWayAlert();
+        }
+      } else if (raceState.status === 'finished' && prevSoundStatus !== 'finished') {
+        soundEngine.playFinishFanfare();
+      }
+      prevSoundStatus = raceState.status;
+      prevSoundCp = raceState.currentCheckpointIndex;
+      prevSoundLap = raceState.lap;
+      prevSoundWrongWay = raceState.isWrongWay;
+
+      const gearCount = activeVeh
+        ? activeVeh.spec.bodyStyle === 'formula'
+          ? 6
+          : activeVeh.spec.bodyStyle === 'kart' || activeVeh.spec.bodyStyle === 'cruiser'
+            ? 4
+            : 5
+        : 5;
+      const gearRpm = activeVeh
+        ? computeSimulatedGearAndRpm(
+            Math.abs(activeVeh.state.speed),
+            activeVeh.spec.stats.maxForwardSpeed,
+            gearCount,
+          )
+        : { gear: 1, rpmNorm: 0.2 };
+
+      soundEngine.update(
+        {
+          isDriving: Boolean(charState.mode === 'driving' && activeVeh),
+          bodyStyle: activeVeh ? activeVeh.spec.bodyStyle : 'kart',
+          speed: activeVeh ? activeVeh.state.speed : 0,
+          maxSpeed: activeVeh ? activeVeh.spec.stats.maxForwardSpeed : CHARACTER_PHYSICS.sprintSpeed,
+          throttle: mergedKartInput.accelerate,
+          braking: mergedKartInput.brakeReverse,
+          lateralSlip: activeVeh ? (activeVeh.state.lateralSpeed ?? 0) : 0,
+          isDrifting: Boolean(activeVeh?.state.isDrifting),
+          onKerb: Boolean(activeVeh?.state.onKerb),
+          onAsphalt: activeVeh ? activeVeh.state.onTrack : true,
+          walkingSpeed: charState.mode === 'walking' ? charState.speed : 0,
+        },
+        frameDt,
+      );
+
+      // Sync React RaceHUD state
+      const nowMs = performance.now();
       const discreteChanged =
         raceState.status !== lastHudStatus ||
         raceState.lap !== lastHudLap ||
         raceState.currentCheckpointIndex !== lastHudCp ||
         raceState.isFinished !== lastHudFinished ||
+        raceState.isWrongWay !== lastHudWrongWay ||
         (raceState.status === 'countdown' && cdCeil !== lastHudCountdownCeil);
       if (discreteChanged || (raceState.status === 'racing' && nowMs - lastHudSyncAt >= 100)) {
         lastHudStatus = raceState.status;
         lastHudLap = raceState.lap;
         lastHudCp = raceState.currentCheckpointIndex;
         lastHudFinished = raceState.isFinished;
+        lastHudWrongWay = raceState.isWrongWay;
         lastHudCountdownCeil = cdCeil;
         lastHudSyncAt = nowMs;
         onRaceStateChangeRef.current(raceState);
       }
 
+      // Diff-gated Player HUD sync (zero idle React re-renders!)
       const activeId = activeVeh ? activeVeh.instanceId : null;
       const nearbyId = nearbyVehRef ? nearbyVehRef.instanceId : null;
+      const curSpeed = activeVeh ? activeVeh.state.speed : charState.speed;
+      const curDrifting = Boolean(activeVeh?.state.isDrifting);
+      const curDriftCharge = activeVeh ? (activeVeh.state.driftCharge ?? 0) : 0;
+      const curDriftBucket = Math.round(curDriftCharge * 20);
+      const curBoostActive = Boolean(activeVeh && (activeVeh.state.boostTimer ?? 0) > 0.02);
+      const curOffTrack = activeVeh ? !activeVeh.state.onTrack : false;
+      const curPosX = activeVeh ? activeVeh.state.x : charState.x;
+      const curPosZ = activeVeh ? activeVeh.state.z : charState.z;
+      const curHeading = activeVeh ? activeVeh.state.yaw : charState.yaw;
+
       const playerHudDiscrete =
         charState.mode !== lastHudPlayerMode ||
         activeId !== lastHudActiveVehId ||
-        nearbyId !== lastHudNearbyVehId;
+        nearbyId !== lastHudNearbyVehId ||
+        gearRpm.gear !== lastHudGear ||
+        curDrifting !== lastHudDrifting ||
+        curBoostActive !== lastHudBoostActive ||
+        curOffTrack !== lastHudOffTrack;
 
-      if (playerHudDiscrete || nowMs - lastPlayerHudSyncAt >= 120) {
+      const playerHudContinuousChanged =
+        Math.abs(curSpeed - lastHudSpeed) >= 0.08 ||
+        curDriftBucket !== lastHudDriftBucket ||
+        Math.hypot(curPosX - lastHudPosX, curPosZ - lastHudPosZ) >= 0.6;
+
+      if (
+        playerHudDiscrete ||
+        (playerHudContinuousChanged && nowMs - lastPlayerHudSyncAt >= 100)
+      ) {
         lastHudPlayerMode = charState.mode;
         lastHudActiveVehId = activeId;
         lastHudNearbyVehId = nearbyId;
+        lastHudSpeed = curSpeed;
+        lastHudGear = gearRpm.gear;
+        lastHudDrifting = curDrifting;
+        lastHudDriftBucket = curDriftBucket;
+        lastHudBoostActive = curBoostActive;
+        lastHudOffTrack = curOffTrack;
+        lastHudPosX = curPosX;
+        lastHudPosZ = curPosZ;
         lastPlayerHudSyncAt = nowMs;
+
         onPlayerInfoChangeRef.current({
           mode: charState.mode,
           activeVehicleId: activeId,
@@ -1243,11 +1381,20 @@ export function GoKartTrackCanvas({
           nearbyVehicleId: nearbyId,
           nearbyVehicleName: nearbyVehRef ? nearbyVehRef.spec.name : null,
           nearbyVehicleTagline: nearbyVehRef ? nearbyVehRef.spec.tagline : null,
-          speedUnits: activeVeh ? activeVeh.state.speed : charState.speed,
+          speedUnits: curSpeed,
+          gear: gearRpm.gear,
+          rpmNorm: gearRpm.rpmNorm,
+          isDrifting: curDrifting,
+          driftCharge: curDriftCharge,
+          boostTimer: activeVeh ? (activeVeh.state.boostTimer ?? 0) : 0,
+          isOffTrack: curOffTrack,
+          posX: curPosX,
+          posZ: curPosZ,
+          heading: curHeading,
         });
       }
 
-      // Update camera position & orientation
+      // Update active camera controller
       const focusX = activeVeh ? activeVeh.state.x : charState.x;
       const focusZ = activeVeh ? activeVeh.state.z : charState.z;
       const focusYaw = activeVeh ? activeVeh.state.yaw : charState.yaw;
@@ -1265,9 +1412,9 @@ export function GoKartTrackCanvas({
         mergedFreeInput.faster = freeKeyInput.faster || touchFree.faster;
         mergedFreeInput.slower = freeKeyInput.slower || touchFree.slower;
 
-        freeCamCtrl.update(camera, mergedFreeInput, dt);
+        freeCamCtrl.update(camera, mergedFreeInput, frameDt);
 
-        const fogAlpha = 1 - Math.exp(-3.6 * dt);
+        const fogAlpha = 1 - Math.exp(-3.6 * frameDt);
         horizonFog.near = THREE.MathUtils.lerp(
           horizonFog.near,
           Math.max(580, camera.position.y * 1.4),
@@ -1280,161 +1427,29 @@ export function GoKartTrackCanvas({
         );
       } else if (mode === 'follow') {
         controls.enabled = false;
-        _targetPos.set(focusX, focusY, focusZ);
-        _forwardVec.set(Math.sin(focusYaw), 0, Math.cos(focusYaw));
-        _sideVec.set(Math.cos(focusYaw), 0, -Math.sin(focusYaw));
+        followCamCtrl.update(
+          camera,
+          controls.target,
+          activePersp,
+          {
+            mode: charState.mode,
+            x: focusX,
+            y: focusY,
+            z: focusZ,
+            yaw: focusYaw,
+            speed: activeVeh ? activeVeh.state.speed : charState.speed,
+            steerAngle: activeVeh ? activeVeh.state.steerAngle : 0,
+            isDrifting: activeVeh?.state.isDrifting,
+            boostTimer: activeVeh?.state.boostTimer,
+            onKerb: activeVeh?.state.onKerb,
+            vehicleSpec: activeVeh ? activeVeh.spec : null,
+          },
+          frameDt,
+          snapFollowNextFrame,
+        );
+        snapFollowNextFrame = false;
 
-        let targetFov = 46;
-        let targetNear = 0.45;
-        let posRate = 10.0;
-        let lookRate = 13.0;
-
-        if (charState.mode === 'driving' && activeVeh) {
-          const sp = activeVeh.spec;
-          const speedRatio = Math.min(1, Math.abs(activeVeh.state.speed) / sp.stats.maxForwardSpeed);
-
-          if (activePersp === 'cockpit') {
-            const seatX = sp.bodyStyle === 'kart' || sp.bodyStyle === 'formula' ? 0 : 0.32;
-            _desiredCamPos
-              .copy(_targetPos)
-              .addScaledVector(_sideVec, seatX)
-              .addScaledVector(_forwardVec, sp.cockpitEyeZ)
-              .setY(focusY + sp.cockpitEyeY);
-            _desiredCamTarget
-              .copy(_targetPos)
-              .addScaledVector(_sideVec, seatX)
-              .addScaledVector(_forwardVec, 26.0)
-              .setY(focusY + sp.cockpitEyeY - 0.14);
-            targetFov = 62 + speedRatio * 4.5;
-            targetNear = 0.16;
-            posRate = 40;
-            lookRate = 40;
-          } else if (activePersp === 'hood') {
-            _desiredCamPos
-              .copy(_targetPos)
-              .addScaledVector(_forwardVec, sp.hoodCamZ)
-              .setY(focusY + sp.hoodCamY);
-            _desiredCamTarget
-              .copy(_targetPos)
-              .addScaledVector(_forwardVec, 28.0)
-              .setY(focusY + sp.hoodCamY - 0.15);
-            targetFov = 60 + speedRatio * 5.0;
-            targetNear = 0.2;
-            posRate = 36;
-            lookRate = 36;
-          } else if (activePersp === 'wide') {
-            _desiredCamPos
-              .copy(_targetPos)
-              .addScaledVector(_forwardVec, -20.5)
-              .setY(focusY + 9.5);
-            _desiredCamTarget
-              .copy(_targetPos)
-              .addScaledVector(_forwardVec, 7.5)
-              .setY(focusY + 1.4);
-            targetFov = 44 + speedRatio * 3.0;
-            targetNear = 0.5;
-            posRate = 8.5;
-            lookRate = 11.0;
-          } else {
-            // 'chase'
-            _desiredCamPos
-              .copy(_targetPos)
-              .addScaledVector(_forwardVec, -sp.chaseDist)
-              .setY(focusY + sp.chaseHeight);
-            _desiredCamTarget
-              .copy(_targetPos)
-              .addScaledVector(_forwardVec, 6.0)
-              .setY(focusY + 1.35);
-            targetFov = 48 + speedRatio * 4.5;
-            targetNear = 0.45;
-          }
-        } else {
-          // Walking character perspectives
-          if (activePersp === 'cockpit') {
-            _desiredCamPos
-              .copy(_targetPos)
-              .addScaledVector(_forwardVec, 0.18)
-              .setY(focusY + 1.84);
-            _desiredCamTarget
-              .copy(_targetPos)
-              .addScaledVector(_forwardVec, 20.0)
-              .setY(focusY + 1.62);
-            targetFov = 64;
-            targetNear = 0.15;
-            posRate = 40;
-            lookRate = 40;
-          } else if (activePersp === 'hood') {
-            // Over-the-shoulder action cam while walking
-            _desiredCamPos
-              .copy(_targetPos)
-              .addScaledVector(_forwardVec, -3.1)
-              .addScaledVector(_sideVec, -1.1)
-              .setY(focusY + 2.05);
-            _desiredCamTarget
-              .copy(_targetPos)
-              .addScaledVector(_forwardVec, 11.0)
-              .setY(focusY + 1.55);
-            targetFov = 52;
-            targetNear = 0.25;
-            posRate = 18;
-            lookRate = 20;
-          } else if (activePersp === 'wide') {
-            _desiredCamPos
-              .copy(_targetPos)
-              .addScaledVector(_forwardVec, -12.5)
-              .setY(focusY + 6.2);
-            _desiredCamTarget
-              .copy(_targetPos)
-              .addScaledVector(_forwardVec, 5.0)
-              .setY(focusY + 1.35);
-            targetFov = 44;
-            targetNear = 0.5;
-            posRate = 9;
-            lookRate = 11;
-          } else {
-            // 'chase'
-            _desiredCamPos
-              .copy(_targetPos)
-              .addScaledVector(_forwardVec, -7.4)
-              .setY(focusY + 3.45);
-            _desiredCamTarget
-              .copy(_targetPos)
-              .addScaledVector(_forwardVec, 4.5)
-              .setY(focusY + 1.45);
-            targetFov = 46;
-            targetNear = 0.4;
-          }
-        }
-
-        if (snapFollowNextFrame) {
-          camera.position.copy(_desiredCamPos);
-          controls.target.copy(_desiredCamTarget);
-          camera.fov = targetFov;
-          camera.near = targetNear;
-          camera.updateProjectionMatrix();
-          snapFollowNextFrame = false;
-        } else {
-          const posAlpha = 1 - Math.exp(-posRate * dt);
-          const lookAlpha = 1 - Math.exp(-lookRate * dt);
-          camera.position.lerp(_desiredCamPos, posAlpha);
-          controls.target.lerp(_desiredCamTarget, lookAlpha);
-
-          let projDirty = false;
-          if (Math.abs(camera.near - targetNear) > 0.03) {
-            camera.near = targetNear;
-            projDirty = true;
-          }
-          if (Math.abs(camera.fov - targetFov) > 0.05) {
-            camera.fov += (targetFov - camera.fov) * (1 - Math.exp(-10 * dt));
-            projDirty = true;
-          }
-          if (projDirty) {
-            camera.updateProjectionMatrix();
-          }
-        }
-        camera.lookAt(controls.target);
-
-        const fogAlpha = 1 - Math.exp(-4.0 * dt);
+        const fogAlpha = 1 - Math.exp(-4.0 * frameDt);
         horizonFog.near = THREE.MathUtils.lerp(horizonFog.near, 620, fogAlpha);
         horizonFog.far = THREE.MathUtils.lerp(horizonFog.far, 2100, fogAlpha);
       } else if (!userMovedOrbit) {
@@ -1444,7 +1459,7 @@ export function GoKartTrackCanvas({
           currentAspect,
           focusX,
           focusZ,
-          dt,
+          frameDt,
           controls.target,
           returningToSpectator,
         );
@@ -1454,7 +1469,7 @@ export function GoKartTrackCanvas({
         if (returningToSpectator && specRes.converged) {
           returningToSpectator = false;
         }
-        const fogAlpha = 1 - Math.exp(-3.6 * dt);
+        const fogAlpha = 1 - Math.exp(-3.6 * frameDt);
         horizonFog.near = THREE.MathUtils.lerp(
           horizonFog.near,
           Math.max(540, specRes.distance * 1.12),
@@ -1470,7 +1485,7 @@ export function GoKartTrackCanvas({
         controls.update();
         const userDist = camera.position.distanceTo(controls.target);
         specDist = userDist;
-        const fogAlpha = 1 - Math.exp(-4.0 * dt);
+        const fogAlpha = 1 - Math.exp(-4.0 * frameDt);
         horizonFog.near = THREE.MathUtils.lerp(
           horizonFog.near,
           Math.max(520, userDist * 1.12),
@@ -1506,6 +1521,9 @@ export function GoKartTrackCanvas({
       disposed = true;
       cancelAnimationFrame(frameId);
       clearTimeout(frameId);
+      window.removeEventListener('pointerdown', unlockAudio);
+      renderer.domElement.removeEventListener('webglcontextlost', onWebGLContextLost);
+      renderer.domElement.removeEventListener('webglcontextrestored', onWebGLContextRestored);
       renderer.domElement.removeEventListener('contextmenu', onCanvasContextMenu);
       renderer.domElement.removeEventListener('mousedown', onCanvasMouseDown);
       renderer.domElement.removeEventListener('pointerdown', onCanvasPointerDown);
@@ -1521,7 +1539,11 @@ export function GoKartTrackCanvas({
       window.removeEventListener('resize', onResize);
       controls.removeEventListener('start', onControlsStart);
       controls.dispose();
+      soundEngine.dispose();
+      soundEngineRef.current = null;
       disposeAtmosphere();
+      vehicleEffects.dispose();
+      checkpointBuild.dispose();
       charRig.dispose();
       for (const v of worldVehicles) {
         v.rig.dispose();
@@ -1547,6 +1569,37 @@ export function GoKartTrackCanvas({
       data-testid="scene-container"
       className="fixed inset-0 w-screen h-screen overflow-hidden bg-[#cbe8fb]"
       style={{ touchAction: 'none' }}
-    />
+    >
+      {webglError && (
+        <div
+          role="alert"
+          data-testid="webgl-fallback"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/95 p-6 text-white"
+        >
+          <div className="max-w-md rounded-3xl border border-white/20 bg-slate-900 p-6 text-center shadow-2xl">
+            <h1 className="text-xl font-black tracking-tight text-rose-400">
+              3D Graphics Unavailable
+            </h1>
+            <p className="mt-2 text-sm text-white/80 leading-relaxed">
+              APEX Kart 3D requires WebGL 2 hardware or software acceleration. Please enable
+              hardware acceleration in your browser settings and reload.
+            </p>
+            <p className="mt-3 rounded-xl bg-black/40 px-3 py-2 font-mono text-xs text-white/60">
+              {webglError}
+            </p>
+          </div>
+        </div>
+      )}
+      {contextLost && !webglError && (
+        <div
+          role="status"
+          className="pointer-events-none fixed top-20 inset-x-0 z-50 flex justify-center px-4"
+        >
+          <div className="rounded-2xl border border-amber-400/60 bg-slate-900/95 px-4 py-2 text-xs font-bold text-amber-200 shadow-xl">
+            Graphics context paused — restoring 3D scene...
+          </div>
+        </div>
+      )}
+    </div>
   );
 }

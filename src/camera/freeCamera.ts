@@ -1,4 +1,6 @@
 import * as THREE from 'three';
+import { FIELD_HALF, PARK_HALF } from '../track/trackLayout';
+import { STADIUM_CONCOURSE_HALF, TOWN_BOUNDS } from '../scene/townLayout';
 
 export interface FreeCameraInputState {
   moveForward: boolean;
@@ -56,13 +58,13 @@ export const DEFAULT_FREE_CAMERA_CONFIG: FreeCameraConfig = {
 export function getFreeCameraMinHeight(x: number, z: number): number {
   const ax = Math.abs(x);
   const az = Math.abs(z);
-  if (ax <= 122 && az <= 122) {
+  if (ax <= FIELD_HALF + 2 && az <= FIELD_HALF + 2) {
     return 1.6; // Grass field & asphalt track (y = 0..0.14)
   }
-  if (ax <= 180 && az <= 180) {
+  if (ax <= STADIUM_CONCOURSE_HALF + 2 && az <= STADIUM_CONCOURSE_HALF + 2) {
     return 1.2; // Stadium concourse apron (y = -0.35)
   }
-  if (ax <= 214 && (az <= 214 || (z > 212 && z <= 430))) {
+  if (ax <= PARK_HALF + 2 && (az <= PARK_HALF + 2 || (z > PARK_HALF && z <= TOWN_BOUNDS.zMax + 6))) {
     return 0.8; // Outer landscaped park lawn & town district (y = -0.85..-0.64)
   }
   return -2.0; // Surrounding horizon ground plane (y = -4.02)

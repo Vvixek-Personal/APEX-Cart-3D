@@ -130,3 +130,26 @@ test('big kart and multi-car fleet have enlarged dimensions and valid spawns', (
     assert.ok(VEHICLE_CATALOG[s.specId], `Missing vehicle spec ${s.specId}`);
   }
 });
+
+test('exitVehicle automatically falls back to passenger/rear side when driver door is blocked', () => {
+  const vehicle = {
+    instanceId: 'veh_test',
+    x: 0,
+    z: 245,
+    yaw: Math.PI, // Facing North (-Z), so left driver side is at -X
+    radius: 1.5,
+  };
+  const drivingState = enterVehicle(createInitialCharacterState(), vehicle);
+
+  // Place a blocking parked vehicle directly on the left driver-side door (-X)
+  const blocker = { x: -3.0, z: 245, radius: 1.6 };
+  const exited = exitVehicle(drivingState, vehicle, [blocker]);
+
+  assert.equal(exited.mode, 'walking');
+  const distToBlocker = Math.hypot(exited.x - blocker.x, exited.z - blocker.z);
+  assert.ok(
+    distToBlocker >= blocker.radius + CHARACTER_PHYSICS.radius - 0.05,
+    `Exited character must not overlap blocking car (dist=${distToBlocker.toFixed(2)})`,
+  );
+  assert.ok(exited.x > 1.5, `Character should exit on unobstructed right side (+X), got x=${exited.x.toFixed(2)}`);
+});

@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import {
+  FIELD_HALF,
   TRACK_HALF,
   TrackFrame,
   getBannerPlacements,
@@ -10,12 +11,14 @@ import {
   isPositionInMarketOrParkPath,
   isPositionOnTownRoad,
 } from '../scene/townLayout';
+import type { VehiclePhysicsStats } from './vehicleCatalog';
 
 export interface KartInputState {
   accelerate: boolean;
   brakeReverse: boolean;
   steerLeft: boolean;
   steerRight: boolean;
+  drift?: boolean;
 }
 
 export interface KartState {
@@ -26,9 +29,15 @@ export interface KartState {
   steerAngle: number;   // Smoothed visual & steering input [-1, 1]
   wheelSpin: number;    // Accumulated wheel rotation angle (radians)
   onTrack: boolean;     // True when on race track OR town paved road/parking lot
+  lateralSpeed?: number; // Signed sideways slip speed along local +X (units/s)
+  yawRate?: number;      // Current angular turn velocity (rad/s)
+  pitchTilt?: number;    // Smoothed suspension squat/dive angle (rad)
+  rollTilt?: number;     // Smoothed suspension cornering body roll (rad)
+  isDrifting?: boolean;  // Active handbrake/powerslide state
+  driftCharge?: number;  // Accumulated drift boost charge [0..1]
+  boostTimer?: number;   // Remaining exit traction boost seconds
+  onKerb?: boolean;      // True when tires ride the painted corner kerbs
 }
-
-import type { VehiclePhysicsStats } from './vehicleCatalog';
 
 export const KART_PHYSICS: VehiclePhysicsStats & {
   worldMinX: number;
@@ -68,6 +77,14 @@ export function createInitialKartState(_curve?: THREE.CatmullRomCurve3): KartSta
     steerAngle: 0,
     wheelSpin: 0,
     onTrack: true,
+    lateralSpeed: 0,
+    yawRate: 0,
+    pitchTilt: 0,
+    rollTilt: 0,
+    isDrifting: false,
+    driftCharge: 0,
+    boostTimer: 0,
+    onKerb: false,
   };
 }
 
@@ -88,22 +105,35 @@ export function createGridKartState(curve: THREE.CatmullRomCurve3): KartState {
     steerAngle: 0,
     wheelSpin: 0,
     onTrack: true,
+    lateralSpeed: 0,
+    yawRate: 0,
+    pitchTilt: 0,
+    rollTilt: 0,
+    isDrifting: false,
+    driftCharge: 0,
+    boostTimer: 0,
+    onKerb: false,
   };
 }
 
+export interface NearestTrackQueryResult {
+  distance: number;
+  frameIndex: number;
+}
+
 /**
- * Computes minimum distance from world XZ point (x, z) to the closed track centerline.
- * Reuses the exact sampled track frames from trackLayout.ts.
+ * Finds both minimum distance to the closed track centerline and the nearest frame index.
  */
-export function distanceToTrackCenterline(
+export function queryNearestTrackCenterline(
   x: number,
   z: number,
   frames: ReadonlyArray<TrackFrame>,
-): number {
+): NearestTrackQueryResult {
   const n = frames.length;
-  if (n === 0) return Infinity;
+  if (n === 0) return { distance: Infinity, frameIndex: 0 };
 
   let minDistSq = Infinity;
+  let bestIdx = 0;
   for (let i = 0; i < n; i++) {
     const a = frames[i].position;
     const b = frames[(i + 1) % n].position;
@@ -123,19 +153,35 @@ export function distanceToTrackCenterline(
     const d2 = dx * dx + dz * dz;
     if (d2 < minDistSq) {
       minDistSq = d2;
+      bestIdx = t > 0.5 ? (i + 1) % n : i;
     }
   }
-  return Math.sqrt(minDistSq);
+  return { distance: Math.sqrt(minDistSq), frameIndex: bestIdx };
+}
+
+/**
+ * Computes minimum distance from world XZ point (x, z) to the closed track centerline.
+ */
+export function distanceToTrackCenterline(
+  x: number,
+  z: number,
+  frames: ReadonlyArray<TrackFrame>,
+): number {
+  return queryNearestTrackCenterline(x, z, frames).distance;
 }
 
 /**
  * Checks whether world XZ position lies on the asphalt ribbon (within TRACK_HALF).
+ * Uses fast stadium-field bounding-box rejection so town driving skips the 640-segment scan.
  */
 export function isPositionOnTrack(
   x: number,
   z: number,
   frames: ReadonlyArray<TrackFrame>,
 ): boolean {
+  if (Math.abs(x) > FIELD_HALF || Math.abs(z) > FIELD_HALF) {
+    return false;
+  }
   return distanceToTrackCenterline(x, z, frames) <= TRACK_HALF;
 }
 
@@ -147,7 +193,7 @@ export function isPositionOnDrivableAsphalt(
   z: number,
   frames: ReadonlyArray<TrackFrame>,
 ): boolean {
-  return isPositionOnTrack(x, z, frames) || isPositionOnTownRoad(x, z);
+  return isPositionOnTownRoad(x, z) || isPositionOnTrack(x, z, frames);
 }
 
 export interface DynamicCircleObstacle {
@@ -158,7 +204,7 @@ export interface DynamicCircleObstacle {
 
 /**
  * Resolves smooth circle-vs-AABB collisions against town buildings, park features,
- * and stadium stand walls so the vehicle slides cleanly without getting stuck.
+ * gantries, archways, and stadium stand walls so the vehicle slides cleanly without getting stuck.
  */
 export function resolveStaticCollisions(
   x: number,
@@ -227,11 +273,11 @@ export function resolveStaticCollisions(
 }
 
 /**
- * Advances vehicle physics by rawDt seconds using smooth arcade controls:
- * - Full speed on race track, town roads, and parking lots
- * - Slightly moderated speed on market plazas / park paved paths
- * - Grass speed reduction when driving onto turf (fully recoverable)
- * - Smooth sliding collision against buildings, stands, park monuments, and parked vehicles
+ * Advances vehicle physics by rawDt seconds using responsive semi-realistic arcade dynamics:
+ * - Surface-dependent grip & top speed (asphalt, cobblestone plaza, turf, and FIA kerbs)
+ * - Lateral tire slip angle, cornering weight transfer, and handbrake powerslide/drift + exit boost
+ * - Suspension chassis squat, dive, and cornering roll angles
+ * - Vector-projected wall sliding (head-on wall hits stop cleanly; glancing impacts slide smoothly)
  */
 export function stepKartPhysics(
   state: KartState,
@@ -244,24 +290,37 @@ export function stepKartPhysics(
   const dt = Math.min(Math.max(rawDt, 0), 0.05);
   if (dt === 0) return state;
 
-  const onAsphalt = isPositionOnDrivableAsphalt(state.x, state.z, frames);
+  const inStadiumBounds = Math.abs(state.x) <= FIELD_HALF && Math.abs(state.z) <= FIELD_HALF;
+  const trackDist = inStadiumBounds ? distanceToTrackCenterline(state.x, state.z, frames) : Infinity;
+  const onRaceTrack = trackDist <= TRACK_HALF;
+  const onKerb = inStadiumBounds && trackDist >= TRACK_HALF - 1.35 && trackDist <= TRACK_HALF + 0.65;
+  const onAsphalt = onRaceTrack || isPositionOnTownRoad(state.x, state.z);
   const onPlazaPath = !onAsphalt && isPositionInMarketOrParkPath(state.x, state.z);
-  const topSpeed = onAsphalt
+
+  let boostTimer = Math.max(0, (state.boostTimer ?? 0) - dt);
+  const boostMult = boostTimer > 0 ? 1.12 : 1.0;
+
+  const baseTopSpeed = onAsphalt
     ? stats.maxForwardSpeed
     : onPlazaPath
       ? stats.plazaMaxSpeed
       : stats.offTrackMaxSpeed;
+  const topSpeed = baseTopSpeed * boostMult;
 
-  let speed = state.speed;
+  const prevSpeed = state.speed;
+  let speed = prevSpeed;
 
   // Throttle & Brake / Reverse
   if (input.accelerate && !input.brakeReverse) {
     if (speed < 0) {
       speed = Math.min(0, speed + stats.brakeRate * dt);
     } else if (speed < topSpeed) {
-      speed = Math.min(topSpeed, speed + stats.accelRate * dt);
+      const accelMult = boostTimer > 0 ? 1.3 : 1.0;
+      speed = Math.min(topSpeed, speed + stats.accelRate * accelMult * dt);
     } else if (!onAsphalt) {
       speed = Math.max(topSpeed, speed - stats.offTrackDrag * dt);
+    } else if (speed > topSpeed) {
+      speed = Math.max(topSpeed, speed - stats.coastDrag * 0.8 * dt);
     }
   } else if (input.brakeReverse && !input.accelerate) {
     if (speed > 0) {
@@ -288,7 +347,27 @@ export function stepKartPhysics(
   const steerBlend = 1 - Math.exp(-stats.steerResponseRate * dt);
   const steerAngle = state.steerAngle + (rawSteer - state.steerAngle) * steerBlend;
 
-  // Speed-responsive steering along heading
+  // Handbrake / powerslide state
+  const wantsDrift = Boolean(input.drift);
+  const wasDrifting = Boolean(state.isDrifting);
+  const canSustainDrift = speed > 8.5 && (Math.abs(steerAngle) > 0.12 || Math.abs(state.lateralSpeed ?? 0) > 1.8);
+  const isDrifting = wantsDrift && canSustainDrift;
+
+  let driftCharge = state.driftCharge ?? 0;
+  if (isDrifting) {
+    // Scrub a tiny bit of straight-line speed during deep drift while building exit boost
+    speed = Math.max(0, speed - 2.6 * Math.abs(steerAngle) * dt);
+    if (onAsphalt || onPlazaPath) {
+      driftCharge = Math.min(1, driftCharge + dt * 0.95);
+    }
+  } else {
+    if (wasDrifting && driftCharge >= 0.42 && input.accelerate) {
+      boostTimer = 0.7;
+    }
+    driftCharge = Math.max(0, driftCharge - dt * 2.5);
+  }
+
+  // Speed-responsive yaw authority (enhanced tail rotation when drifting)
   const absSpeed = Math.abs(speed);
   const speedSteerFactor =
     absSpeed < 0.25
@@ -296,39 +375,100 @@ export function stepKartPhysics(
       : THREE.MathUtils.clamp(absSpeed / 7.5, 0.22, 1.0) *
         (1.0 - 0.14 * THREE.MathUtils.clamp((absSpeed - 14) / 12, 0, 1));
   const reverseSign = speed >= 0 ? 1 : -1;
-  const yaw = state.yaw + steerAngle * stats.maxTurnRate * speedSteerFactor * reverseSign * dt;
+  const driftTurnBoost = isDrifting ? 1.28 : 1.0;
+  const yawRate = steerAngle * stats.maxTurnRate * driftTurnBoost * speedSteerFactor * reverseSign;
+  const yaw = state.yaw + yawRate * dt;
 
-  // Move along vehicle heading
+  // Lateral tire slip dynamics (local +X is left of +Z heading: sideVec = (cos(yaw), -sin(yaw)))
+  let lateralSpeed = state.lateralSpeed ?? 0;
+  const slipInjection = isDrifting ? 0.34 : onAsphalt ? 0.065 : 0.15;
+  lateralSpeed -= speed * yawRate * slipInjection * dt * 8.0;
+  const lateralGrip = isDrifting ? 3.2 : onAsphalt ? 13.5 : onPlazaPath ? 10.5 : 5.8;
+  lateralSpeed *= Math.exp(-lateralGrip * dt);
+  lateralSpeed = THREE.MathUtils.clamp(lateralSpeed, -11.5, 11.5);
+  if (Math.abs(lateralSpeed) < 0.01) lateralSpeed = 0;
+
+  // World velocity combining forward heading + lateral tire slip
   const forwardX = Math.sin(yaw);
   const forwardZ = Math.cos(yaw);
-  let nextX = state.x + forwardX * speed * dt;
-  let nextZ = state.z + forwardZ * speed * dt;
+  const sideX = Math.cos(yaw);
+  const sideZ = -Math.sin(yaw);
+
+  let vx = forwardX * speed + sideX * lateralSpeed;
+  let vz = forwardZ * speed + sideZ * lateralSpeed;
+
+  const rawNextX = state.x + vx * dt;
+  const rawNextZ = state.z + vz * dt;
 
   // Resolve building / stadium wall / parked vehicle collisions smoothly
-  const resolved = resolveStaticCollisions(nextX, nextZ, stats.kartRadius, dynamicObstacles);
-  nextX = resolved.x;
-  nextZ = resolved.z;
+  const resolved = resolveStaticCollisions(rawNextX, rawNextZ, stats.kartRadius, dynamicObstacles);
+  let nextX = resolved.x;
+  let nextZ = resolved.z;
+
   if (resolved.collided) {
-    speed *= 0.72;
+    const pushX = resolved.x - rawNextX;
+    const pushZ = resolved.z - rawNextZ;
+    const pushLen = Math.hypot(pushX, pushZ);
+    if (pushLen > 1e-6) {
+      const nx = pushX / pushLen;
+      const nz = pushZ / pushLen;
+      const vn = vx * nx + vz * nz;
+      if (vn < 0) {
+        // Cancel velocity into the wall normal and apply light scrape friction along wall tangent
+        vx = (vx - vn * nx) * 0.9;
+        vz = (vz - vn * nz) * 0.9;
+      }
+      speed = vx * forwardX + vz * forwardZ;
+      lateralSpeed = (vx * sideX + vz * sideZ) * 0.5;
+      if (Math.abs(speed) < 0.08) speed = 0;
+    } else {
+      speed *= 0.5;
+      lateralSpeed *= 0.5;
+    }
+    driftCharge = 0;
   }
 
   // Keep vehicle inside the full town + stadium playable world
   if (nextX < KART_PHYSICS.worldMinX) {
     nextX = KART_PHYSICS.worldMinX;
-    speed *= 0.6;
+    if (vx < 0) vx = 0;
+    speed = vx * forwardX + vz * forwardZ;
   } else if (nextX > KART_PHYSICS.worldMaxX) {
     nextX = KART_PHYSICS.worldMaxX;
-    speed *= 0.6;
+    if (vx > 0) vx = 0;
+    speed = vx * forwardX + vz * forwardZ;
   }
   if (nextZ < KART_PHYSICS.worldMinZ) {
     nextZ = KART_PHYSICS.worldMinZ;
-    speed *= 0.6;
+    if (vz < 0) vz = 0;
+    speed = vx * forwardX + vz * forwardZ;
   } else if (nextZ > KART_PHYSICS.worldMaxZ) {
     nextZ = KART_PHYSICS.worldMaxZ;
-    speed *= 0.6;
+    if (vz > 0) vz = 0;
+    speed = vx * forwardX + vz * forwardZ;
   }
 
-  const nextOnTrack = isPositionOnDrivableAsphalt(nextX, nextZ, frames) || isPositionInMarketOrParkPath(nextX, nextZ);
+  // Suspension chassis squat/dive (pitch) and cornering body roll
+  const longAccel = (speed - prevSpeed) / dt;
+  const latAccel = speed * yawRate;
+  const kerbJitter = onKerb && absSpeed > 3 ? Math.sin(state.wheelSpin * 2.6) * 0.014 : 0;
+  // Positive longAccel (accelerating) pitches nose slightly up (-rotX); braking dives nose (+rotX)
+  const targetPitch = THREE.MathUtils.clamp(-longAccel * 0.0022, -0.065, 0.075);
+  // Left turn (yawRate > 0) rolls chassis outward to the right (+rotZ in local space)
+  const targetRoll = THREE.MathUtils.clamp(latAccel * 0.0026 + kerbJitter, -0.11, 0.11);
+  const suspAlpha = 1 - Math.exp(-11.0 * dt);
+  const pitchTilt = (state.pitchTilt ?? 0) + (targetPitch - (state.pitchTilt ?? 0)) * suspAlpha;
+  const rollTilt = (state.rollTilt ?? 0) + (targetRoll - (state.rollTilt ?? 0)) * suspAlpha;
+
+  const nextInStadium = Math.abs(nextX) <= FIELD_HALF && Math.abs(nextZ) <= FIELD_HALF;
+  const nextTrackDist = nextInStadium ? distanceToTrackCenterline(nextX, nextZ, frames) : Infinity;
+  const nextOnTrack =
+    nextTrackDist <= TRACK_HALF ||
+    isPositionOnTownRoad(nextX, nextZ) ||
+    isPositionInMarketOrParkPath(nextX, nextZ);
+  const nextOnKerb =
+    nextInStadium && nextTrackDist >= TRACK_HALF - 1.35 && nextTrackDist <= TRACK_HALF + 0.65;
+
   const wheelSpin = state.wheelSpin + (speed * dt) / Math.max(0.15, stats.wheelRadius);
 
   return {
@@ -339,5 +479,13 @@ export function stepKartPhysics(
     steerAngle,
     wheelSpin,
     onTrack: nextOnTrack,
+    lateralSpeed,
+    yawRate,
+    pitchTilt,
+    rollTilt,
+    isDrifting,
+    driftCharge,
+    boostTimer,
+    onKerb: nextOnKerb,
   };
 }

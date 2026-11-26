@@ -1,6 +1,5 @@
 {
   "name": "Apex Kart Track 3D",
-  "description": "Clean, game-ready 3D go-kart racing track environment on a bright square grass field with START and FINISH banners.",
-  "requestFramePermissions": [],
-  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+  "description": "Interactive 3D European town & Grand Prix stadium racing experience with walkable character exploration, 10 drivable vehicles, drift physics, procedural audio, and multi-perspective cameras.",
+  "requestFramePermissions": []
 }
