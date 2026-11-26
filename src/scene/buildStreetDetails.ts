@@ -87,7 +87,7 @@ export function buildStreetDetails() {
   resources.push(texture);
   const signMat = new THREE.MeshStandardMaterial({ map: texture, roughness: .7, side: THREE.DoubleSide });
   resources.push(signMat);
-  for (const [x, z, yaw] of [[5.4, 289, 0], [-5.4, 247, Math.PI], [5.4, 343, 0]]) {
+  for (const [x, z, yaw] of [[11.8, 291, 0], [-11.8, 249, Math.PI], [11.8, 345, 0]]) {
     cylinder(.045, 3.4, x, walkY + 1.7, z, 0x787b70);
     const geo = new THREE.PlaneGeometry(.92, .92);
     const uv = geo.getAttribute('uv');

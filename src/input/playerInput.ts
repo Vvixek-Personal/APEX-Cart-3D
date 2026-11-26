@@ -210,12 +210,6 @@ export class KeyboardInputTracker {
           this.callbacks.onToggleFreeCam();
         }
         break;
-      case 'KeyM':
-        if (!e.repeat && this.callbacks.onToggleMute) {
-          e.preventDefault();
-          this.callbacks.onToggleMute();
-        }
-        break;
       case 'Home':
         if (!e.repeat) {
           e.preventDefault();

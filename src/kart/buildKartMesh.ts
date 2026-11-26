@@ -11,7 +11,6 @@ export interface KartMeshRig {
   driverGroup: THREE.Group;
   driverHead: THREE.Group;
   steeringWheel: THREE.Object3D | null;
-  highlightRing: THREE.Mesh;
   setBrakeLights: (braking: boolean, active?: boolean) => void;
   dispose: () => void;
 }
@@ -120,23 +119,6 @@ export function buildVehicleMesh(
   group.add(shadowMesh);
   geometries.push(shadowGeo);
   materials.push(shadowMat);
-
-  // Proximity selection ring (shown only when player character walks nearby)
-  const ringGeo = new THREE.RingGeometry(2.35, 2.72, 32);
-  ringGeo.rotateX(-Math.PI / 2);
-  const ringMat = new THREE.MeshBasicMaterial({
-    color: 0x38bdf8,
-    transparent: true,
-    opacity: 0.85,
-    side: THREE.DoubleSide,
-    depthWrite: false,
-  });
-  const highlightRing = new THREE.Mesh(ringGeo, ringMat);
-  highlightRing.position.set(0, 0.04, 0);
-  highlightRing.visible = false;
-  group.add(highlightRing);
-  geometries.push(ringGeo);
-  materials.push(ringMat);
 
   // Shared PBR material palette per vehicle (polished clearcoat-like automotive sheen)
   const bodyPaintMat = new THREE.MeshPhysicalMaterial({
@@ -582,12 +564,267 @@ export function buildVehicleMesh(
     driverHead = dvr.driverHead;
     driverGroup.position.set(0, 0.48 - 0.32, -0.05);
     chassisGroup.add(driverGroup);
+  } else if (spec.bodyStyle === 'bus') {
+    // Long single-deck city bus: high glazed body, doors, roof AC pod & destination box
+    const busW = 2.5;
+    const busL = 9.6;
+    const floorY = 0.62;
+    const bodyH = 2.5;
+    const bodyCenterY = floorY + bodyH * 0.5;
+
+    const busBodyGeo = new RoundedBoxGeometry(busW, bodyH, busL, 2, 0.16);
+    const busBody = new THREE.Mesh(busBodyGeo, bodyPaintMat);
+    busBody.position.set(0, bodyCenterY, 0);
+    busBody.castShadow = true;
+    busBody.receiveShadow = true;
+    bodyGroup.add(busBody);
+    geometries.push(busBodyGeo);
+
+    // Continuous glazed upper band + window pillar strips on both sides
+    const bandGeo = new THREE.BoxGeometry(busW + 0.06, 1.02, busL - 1.7);
+    const band = new THREE.Mesh(bandGeo, glassMat);
+    band.position.set(0, bodyCenterY + 0.62, 0);
+    bodyGroup.add(band);
+    geometries.push(bandGeo);
+    const pillarGeo = new THREE.BoxGeometry(busW + 0.09, 1.02, 0.16);
+    geometries.push(pillarGeo);
+    for (let i = 0; i < 7; i++) {
+      const pillar = new THREE.Mesh(pillarGeo, bodyPaintMat);
+      pillar.position.set(0, bodyCenterY + 0.62, -busL * 0.36 + i * (busL * 0.72 / 6));
+      bodyGroup.add(pillar);
+    }
+
+    // Two-tone skirt stripe
+    const skirtGeo = new THREE.BoxGeometry(busW + 0.05, 0.34, busL - 0.5);
+    const skirt = new THREE.Mesh(skirtGeo, accentMat);
+    skirt.position.set(0, floorY + 0.34, 0);
+    bodyGroup.add(skirt);
+    geometries.push(skirtGeo);
+
+    // Destination display box & flat windshield
+    const destGeo = new THREE.BoxGeometry(1.7, 0.36, 0.1);
+    const dest = new THREE.Mesh(destGeo, chassisMat);
+    dest.position.set(0, bodyCenterY + bodyH * 0.5 - 0.16, busL * 0.5 - 0.02);
+    bodyGroup.add(dest);
+    geometries.push(destGeo);
+    const wsGeo = new THREE.BoxGeometry(2.28, 1.1, 0.09);
+    const windshield = new THREE.Mesh(wsGeo, glassMat);
+    windshield.position.set(0, bodyCenterY + 0.55, busL * 0.5 + 0.01);
+    bodyGroup.add(windshield);
+    geometries.push(wsGeo);
+
+    // Roof AC pod + emergency hatch
+    const acGeo = new RoundedBoxGeometry(1.8, 0.3, 3.4, 1, 0.1);
+    const acPod = new THREE.Mesh(acGeo, chassisMat);
+    acPod.position.set(0, bodyCenterY + bodyH * 0.5 + 0.14, -0.6);
+    acPod.castShadow = true;
+    bodyGroup.add(acPod);
+    geometries.push(acGeo);
+
+    // Bumpers, lights & mirrors
+    const busBumpGeo = new THREE.BoxGeometry(busW + 0.08, 0.4, 0.26);
+    geometries.push(busBumpGeo);
+    for (const end of [1, -1]) {
+      const bump = new THREE.Mesh(busBumpGeo, chassisMat);
+      bump.position.set(0, 0.72, end * (busL * 0.5 + 0.06));
+      bump.castShadow = true;
+      bodyGroup.add(bump);
+    }
+    const busLightGeo = new THREE.BoxGeometry(0.46, 0.18, 0.09);
+    geometries.push(busLightGeo);
+    for (const side of [-0.82, 0.82]) {
+      const hl = new THREE.Mesh(busLightGeo, headlightMat);
+      hl.position.set(side, 1.02, busL * 0.5 + 0.02);
+      const tl = new THREE.Mesh(busLightGeo, taillightMat);
+      tl.position.set(side, 1.02, -busL * 0.5 - 0.02);
+      bodyGroup.add(hl, tl);
+    }
+    for (const side of [-1, 1]) {
+      detailBox(bodyGroup, [0.06, 0.34, 0.06], [side * (busW * 0.5 + 0.18), bodyCenterY + 0.85, busL * 0.5 - 0.6], chassisMat);
+      detailBox(bodyGroup, [0.3, 0.14, 0.1], [side * (busW * 0.5 + 0.3), bodyCenterY + 0.98, busL * 0.5 - 0.6], chassisMat);
+    }
+
+    const busTireGeo = new THREE.CylinderGeometry(0.52, 0.52, 0.42, 18);
+    busTireGeo.rotateZ(Math.PI / 2);
+    const busHubGeo = new THREE.CylinderGeometry(0.3, 0.3, 0.44, 14);
+    busHubGeo.rotateZ(Math.PI / 2);
+    geometries.push(busTireGeo, busHubGeo);
+    const busHalfW = busW * 0.5 + 0.03;
+    frontLeftPivot.position.set(busHalfW, 0.52, busL * 0.33);
+    frontLeftPivot.add(createWheelAssembly(busTireGeo, busHubGeo, 0.28, 0.42));
+    group.add(frontLeftPivot);
+    frontRightPivot.position.set(-busHalfW, 0.52, busL * 0.33);
+    frontRightPivot.add(createWheelAssembly(busTireGeo, busHubGeo, 0.28, 0.42));
+    group.add(frontRightPivot);
+    const busRl = createWheelAssembly(busTireGeo, busHubGeo, 0.28, 0.42);
+    busRl.position.set(busHalfW, 0.52, -busL * 0.3);
+    const busRr = createWheelAssembly(busTireGeo, busHubGeo, 0.28, 0.42);
+    busRr.position.set(-busHalfW, 0.52, -busL * 0.3);
+    group.add(busRl, busRr);
+
+    // Upright bus steering wheel in front of the driver seat
+    const busWheelPivot = new THREE.Group();
+    busWheelPivot.position.set(0.62, 2.02, 3.42);
+    busWheelPivot.rotation.x = -0.82;
+    const busRimGeo = new THREE.TorusGeometry(0.27, 0.032, 8, 22);
+    const busRim = new THREE.Mesh(busRimGeo, seatMat);
+    const busSpokeGeo = new THREE.BoxGeometry(0.5, 0.045, 0.03);
+    const busSpoke = new THREE.Mesh(busSpokeGeo, chassisMat);
+    busWheelPivot.add(busRim, busSpoke);
+    bodyGroup.add(busWheelPivot);
+    steeringWheel = busWheelPivot;
+    geometries.push(busRimGeo, busSpokeGeo);
+
+    const dvr = createSeatedDriver(geometries, materials, 1.12);
+    driverGroup = dvr.driverGroup;
+    driverHead = dvr.driverHead;
+    driverGroup.position.set(0.62, 1.62 - 0.32, 2.9);
+    chassisGroup.add(driverGroup);
+  } else if (spec.bodyStyle === 'van' || spec.bodyStyle === 'pickup') {
+    // Panel delivery van & open-bed pickup built from sculpted box work
+    const isPickup = spec.bodyStyle === 'pickup';
+    const vW = isPickup ? 2.12 : 2.16;
+    const vL = isPickup ? 5.5 : 5.4;
+    const wheelR = spec.stats.wheelRadius;
+
+    // Low chassis skirt with wheel arches
+    const skirtGeo = new THREE.BoxGeometry(vW, 0.52, vL * 0.96);
+    const skirt = new THREE.Mesh(skirtGeo, chassisMat);
+    skirt.position.set(0, 0.62, 0);
+    skirt.castShadow = true;
+    bodyGroup.add(skirt);
+    geometries.push(skirtGeo);
+
+    if (isPickup) {
+      // Cab with glass cabin + open cargo bed with walls & tailgate
+      const cabGeo = new RoundedBoxGeometry(vW, 1.06, 1.85, 1, 0.1);
+      const cab = new THREE.Mesh(cabGeo, bodyPaintMat);
+      cab.position.set(0, 1.36, 0.85);
+      cab.castShadow = true;
+      bodyGroup.add(cab);
+      geometries.push(cabGeo);
+      const bedFloorGeo = new THREE.BoxGeometry(vW - 0.16, 0.14, 2.6);
+      const bedFloor = new THREE.Mesh(bedFloorGeo, chassisMat);
+      bedFloor.position.set(0, 1.06, -1.25);
+      bodyGroup.add(bedFloor);
+      geometries.push(bedFloorGeo);
+      const wallGeo = new THREE.BoxGeometry(0.1, 0.55, 2.6);
+      geometries.push(wallGeo);
+      for (const side of [-1, 1]) {
+        const wall = new THREE.Mesh(wallGeo, bodyPaintMat);
+        wall.position.set(side * (vW * 0.5 - 0.05), 1.38, -1.25);
+        wall.castShadow = true;
+        bodyGroup.add(wall);
+      }
+      const tailGeo = new THREE.BoxGeometry(vW - 0.12, 0.55, 0.1);
+      const tail = new THREE.Mesh(tailGeo, bodyPaintMat);
+      tail.position.set(0, 1.38, -2.54);
+      bodyGroup.add(tail);
+      geometries.push(tailGeo);
+      // Roof bar over cab
+      const barGeo = new THREE.CylinderGeometry(0.05, 0.05, vW - 0.3, 8);
+      barGeo.rotateZ(Math.PI / 2);
+      const bar = new THREE.Mesh(barGeo, chassisMat);
+      bar.position.set(0, 1.98, 0.85);
+      bodyGroup.add(bar);
+      geometries.push(barGeo);
+      // Cabin glass windshield
+      const vwsGeo = new THREE.BoxGeometry(vW - 0.24, 0.62, 0.08);
+      const vws = new THREE.Mesh(vwsGeo, glassMat);
+      vws.position.set(0, 1.62, 1.79);
+      vws.rotation.x = -0.12;
+      bodyGroup.add(vws);
+      geometries.push(vwsGeo);
+    } else {
+      // One-box panel van: short hood, big cargo box
+      const hoodGeo = new RoundedBoxGeometry(vW, 0.7, 1.0, 1, 0.1);
+      const hood = new THREE.Mesh(hoodGeo, bodyPaintMat);
+      hood.position.set(0, 1.06, 2.15);
+      hood.castShadow = true;
+      bodyGroup.add(hood);
+      geometries.push(hoodGeo);
+      const cargoGeo = new RoundedBoxGeometry(vW, 2.05, 3.6, 1, 0.12);
+      const cargo = new THREE.Mesh(cargoGeo, bodyPaintMat);
+      cargo.position.set(0, 1.78, -0.6);
+      cargo.castShadow = true;
+      bodyGroup.add(cargo);
+      geometries.push(cargoGeo);
+      const vwsGeo = new THREE.BoxGeometry(vW - 0.2, 0.78, 0.09);
+      const vws = new THREE.Mesh(vwsGeo, glassMat);
+      vws.position.set(0, 1.72, 1.62);
+      vws.rotation.x = -0.14;
+      bodyGroup.add(vws);
+      geometries.push(vwsGeo);
+      // Accent beltline stripe along cargo box
+      const stripeGeo = new THREE.BoxGeometry(vW + 0.05, 0.22, 3.6);
+      const stripeM = new THREE.Mesh(stripeGeo, accentMat);
+      stripeM.position.set(0, 1.16, -0.6);
+      bodyGroup.add(stripeM);
+      geometries.push(stripeGeo);
+      // Rear barn doors seam
+      detailBox(bodyGroup, [0.06, 1.7, 0.06], [0, 1.78, -2.42], chassisMat, 0.02);
+    }
+
+    const vBumpGeo = new THREE.BoxGeometry(vW + 0.06, 0.26, 0.24);
+    geometries.push(vBumpGeo);
+    for (const end of [1, -1]) {
+      const bump = new THREE.Mesh(vBumpGeo, chassisMat);
+      bump.position.set(0, 0.66, end * (vL * 0.5 + 0.05));
+      bodyGroup.add(bump);
+    }
+    const vLightGeo = new THREE.BoxGeometry(0.4, 0.16, 0.08);
+    geometries.push(vLightGeo);
+    for (const side of [-0.72, 0.72]) {
+      const hl = new THREE.Mesh(vLightGeo, headlightMat);
+      hl.position.set(side, 0.98, vL * 0.5 + 0.02);
+      const tl = new THREE.Mesh(vLightGeo, taillightMat);
+      tl.position.set(side, 1.0, -vL * 0.5 - 0.02);
+      bodyGroup.add(hl, tl);
+    }
+
+    const vTireGeo = new THREE.CylinderGeometry(wheelR, wheelR, 0.36, 18);
+    vTireGeo.rotateZ(Math.PI / 2);
+    const vHubGeo = new THREE.CylinderGeometry(wheelR * 0.55, wheelR * 0.55, 0.38, 14);
+    vHubGeo.rotateZ(Math.PI / 2);
+    geometries.push(vTireGeo, vHubGeo);
+    const vHalfW = vW * 0.5 + 0.05;
+    frontLeftPivot.position.set(vHalfW, wheelR, vL * 0.31);
+    frontLeftPivot.add(createWheelAssembly(vTireGeo, vHubGeo, wheelR * 0.55, 0.36));
+    group.add(frontLeftPivot);
+    frontRightPivot.position.set(-vHalfW, wheelR, vL * 0.31);
+    frontRightPivot.add(createWheelAssembly(vTireGeo, vHubGeo, wheelR * 0.55, 0.36));
+    group.add(frontRightPivot);
+    const vRl = createWheelAssembly(vTireGeo, vHubGeo, wheelR * 0.55, 0.36);
+    vRl.position.set(vHalfW, wheelR, -vL * 0.32);
+    const vRr = createWheelAssembly(vTireGeo, vHubGeo, wheelR * 0.55, 0.36);
+    vRr.position.set(-vHalfW, wheelR, -vL * 0.32);
+    group.add(vRl, vRr);
+
+    // Cab steering wheel
+    const vWheelPivot = new THREE.Group();
+    vWheelPivot.position.set(isPickup ? 0.34 : 0.5, 1.5, isPickup ? 1.32 : 1.24);
+    vWheelPivot.rotation.x = -0.62;
+    const vRimGeo = new THREE.TorusGeometry(0.19, 0.028, 8, 20);
+    const vRim = new THREE.Mesh(vRimGeo, seatMat);
+    const vSpokeGeo = new THREE.BoxGeometry(0.36, 0.04, 0.03);
+    const vSpoke = new THREE.Mesh(vSpokeGeo, chassisMat);
+    vWheelPivot.add(vRim, vSpoke);
+    bodyGroup.add(vWheelPivot);
+    steeringWheel = vWheelPivot;
+    geometries.push(vRimGeo, vSpokeGeo);
+
+    const dvr = createSeatedDriver(geometries, materials, 1.05);
+    driverGroup = dvr.driverGroup;
+    driverHead = dvr.driverHead;
+    driverGroup.position.set(isPickup ? 0.34 : 0.5, 1.42 - 0.32, isPickup ? 0.85 : 1.3);
+    chassisGroup.add(driverGroup);
   } else {
     const isCruiser = spec.bodyStyle === 'cruiser';
     const isRally = spec.bodyStyle === 'rally';
-    const bodyW = isCruiser ? 2.38 : 2.32;
-    const bodyL = isRally ? 4.35 : 4.7;
-    const lowerH = isCruiser ? 0.88 : 0.72;
+    const isTaxi = spec.bodyStyle === 'taxi';
+    const bodyW = isCruiser ? 2.38 : isTaxi ? 2.28 : 2.32;
+    const bodyL = isRally ? 4.35 : isTaxi ? 4.5 : 4.7;
+    const lowerH = isCruiser ? 0.88 : isTaxi ? 0.66 : 0.72;
 
     const wRad = spec.stats.wheelRadius;
     const axleZ = bodyL * .32;
@@ -637,8 +874,8 @@ export function buildVehicleMesh(
     }
 
     const cabW = bodyW - 0.28;
-    const cabL = isCruiser ? 2.75 : isRally ? 2.25 : 2.1;
-    const cabH = isCruiser ? 0.72 : 0.58;
+    const cabL = isCruiser ? 2.75 : isRally ? 2.25 : isTaxi ? 2.3 : 2.1;
+    const cabH = isCruiser ? 0.72 : isTaxi ? 0.56 : 0.58;
     const cabZ = isCruiser ? -0.25 : -0.22;
 
     const baseY = .34 + lowerH;
@@ -719,6 +956,29 @@ export function buildVehicleMesh(
       }
     }
 
+    if (isTaxi) {
+      // Illuminated roof taxi sign + livery band along the flanks
+      const signGeo = new RoundedBoxGeometry(0.66, 0.22, 0.32, 1, 0.04);
+      geometries.push(signGeo);
+      const signMat = new THREE.MeshStandardMaterial({
+        color: 0xfde047,
+        emissive: 0xf59e0b,
+        emissiveIntensity: 0.55,
+        roughness: 0.3,
+      });
+      materials.push(signMat);
+      const sign = new THREE.Mesh(signGeo, signMat);
+      sign.position.set(0, roofY + 0.16, cabZ);
+      bodyGroup.add(sign);
+      const bandGeo = new THREE.BoxGeometry(0.05, 0.14, bodyL * 0.58);
+      geometries.push(bandGeo);
+      for (const side of [-1, 1]) {
+        const band = new THREE.Mesh(bandGeo, accentMat);
+        band.position.set(side * (bodyW * 0.5 + 0.02), 0.34 + lowerH * 0.55, 0.1);
+        bodyGroup.add(band);
+      }
+    }
+
     const tireGeo = new THREE.CylinderGeometry(wRad, wRad, 0.34, 18);
     tireGeo.rotateZ(Math.PI / 2);
     const hubGeo = new THREE.CylinderGeometry(wRad * 0.56, wRad * 0.56, 0.36, 14);
@@ -764,7 +1024,6 @@ export function buildVehicleMesh(
     driverGroup,
     driverHead,
     steeringWheel,
-    highlightRing,
     setBrakeLights: (braking: boolean, active = true) => {
       headlightMat.emissiveIntensity = active ? 0.65 : 0.2;
       taillightMat.emissiveIntensity = braking ? 2.4 : active ? 0.5 : 0.2;

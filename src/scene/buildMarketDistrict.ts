@@ -3,13 +3,17 @@ import { buildStreetDetails } from './buildStreetDetails';
 import { FIELD_HALF, PARK_HALF } from '../track/trackLayout';
 import { ProceduralTextureSet } from './textures';
 import {
+  TOWN_BENCH_SPOTS,
   TOWN_BLOCKS,
   TOWN_BOUNDS,
   TOWN_BUILDINGS,
+  TOWN_CART_SPOTS,
   TOWN_MARKET_STALLS,
   TOWN_PARKING_LOTS,
   TOWN_PARKS,
+  TOWN_PLANTER_SPOTS,
   TOWN_ROADS,
+  TOWN_TREE_SPOTS,
 } from './townLayout';
 import {
   TOWN_PALETTE,
@@ -27,7 +31,7 @@ import {
 
 export interface MarketDistrictBuildResult {
   group: THREE.Group;
-  update: (elapsedSeconds: number) => void;
+  update: (elapsedSeconds: number, nightFactor?: number) => void;
   dispose: () => void;
 }
 
@@ -180,7 +184,7 @@ export function buildMarketDistrict(textures: ProceduralTextureSet): MarketDistr
   const rampHeightDelta = 0 - roadY; // +0.71
   const rampSlopeAngle = Math.atan2(rampHeightDelta, rampLen);
   const rampHypLen = Math.hypot(rampLen, rampHeightDelta) + 0.6;
-  const connectorRampGeo = trackGeo(new THREE.BoxGeometry(9.0, 0.16, rampHypLen));
+  const connectorRampGeo = trackGeo(new THREE.BoxGeometry(13.0, 0.16, rampHypLen));
   const connectorRamp = new THREE.Mesh(connectorRampGeo, asphaltMat);
   connectorRamp.position.set(0, (roadY + 0.03) * 0.5 - 0.05, (PARK_HALF + FIELD_HALF) * 0.5);
   connectorRamp.rotation.x = -rampSlopeAngle;
@@ -192,14 +196,14 @@ export function buildMarketDistrict(textures: ProceduralTextureSet): MarketDistr
   const rampWalkMat = getSolidMat(TOWN_PALETTE.plazaCream, 0.8, 0.02);
   for (const side of [-1, 1]) {
     const sw = new THREE.Mesh(rampWalkGeo, rampWalkMat);
-    sw.position.set(side * 5.8, (roadY + 0.03) * 0.5 - 0.01, (PARK_HALF + FIELD_HALF) * 0.5);
+    sw.position.set(side * 8.1, (roadY + 0.03) * 0.5 - 0.01, (PARK_HALF + FIELD_HALF) * 0.5);
     sw.rotation.x = -rampSlopeAngle;
     sw.receiveShadow = true;
     group.add(sw);
   }
 
   // Flat inner asphalt spur connecting field entry (z=120) to track south straight (z=99)
-  const innerSpurGeo = trackGeo(new THREE.BoxGeometry(9.0, 0.08, 22));
+  const innerSpurGeo = trackGeo(new THREE.BoxGeometry(13.0, 0.08, 22));
   const innerSpur = new THREE.Mesh(innerSpurGeo, asphaltMat);
   innerSpur.position.set(0, 0.02, 109.5);
   innerSpur.receiveShadow = true;
@@ -233,10 +237,14 @@ export function buildMarketDistrict(textures: ProceduralTextureSet): MarketDistr
       roadMesh.receiveShadow = true;
       group.add(roadMesh);
 
+      // Double-yellow center line + dashed white lane dividers for the wide boulevard
       for (const z of stepRange(215, r.zMax - 2, 5.5)) {
-        stripeInstances.push({ x: 0, y: roadY + 0.02, z, sx: 0.2, sz: 2.5, yellow: true });
+        stripeInstances.push({ x: -0.42, y: roadY + 0.02, z, sx: 0.18, sz: 3.2, yellow: true });
+        stripeInstances.push({ x: 0.42, y: roadY + 0.02, z, sx: 0.18, sz: 3.2, yellow: true });
+        stripeInstances.push({ x: -5, y: roadY + 0.02, z, sx: 0.16, sz: 2.4, yellow: false });
+        stripeInstances.push({ x: 5, y: roadY + 0.02, z, sx: 0.16, sz: 2.4, yellow: false });
       }
-      for (const ex of [r.xMin + 0.32, r.xMax - 0.32]) {
+      for (const ex of [r.xMin + 0.34, r.xMax - 0.34]) {
         const edge = new THREE.Mesh(trackGeo(new THREE.BoxGeometry(0.16, 0.02, d)), paintWhiteMat);
         edge.position.set(ex, roadY + 0.02, cz);
         group.add(edge);
@@ -268,15 +276,15 @@ export function buildMarketDistrict(textures: ProceduralTextureSet): MarketDistr
   }
 
   // Zebra crosswalk stripes at main street intersections
-  for (const cz of [217.0, 227.5, 264.5, 274.5, 357.0, 367.0]) {
-    for (let sx = -3.2; sx <= 3.2; sx += 1.1) {
-      stripeInstances.push({ x: sx, y: roadY + 0.025, z: cz, sx: 0.5, sz: 2.0, yellow: false });
+  for (const cz of [218.0, 226.0, 270.0, 278.0, 370.0, 378.0]) {
+    for (let sx = -9; sx <= 9; sx += 1.6) {
+      stripeInstances.push({ x: sx, y: roadY + 0.025, z: cz, sx: 0.55, sz: 2.1, yellow: false });
     }
   }
-  for (const cx of [-6.4, 6.4]) {
-    for (const cz of [222.0, 269.5, 362.0]) {
-      for (let dz = -2.6; dz <= 2.6; dz += 1.1) {
-        stripeInstances.push({ x: cx, y: roadY + 0.025, z: cz + dz, sx: 1.8, sz: 0.48, yellow: false });
+  for (const cx of [-11.5, 11.5]) {
+    for (const cz of [222.0, 274.0, 374.0]) {
+      for (let dz = -3.0; dz <= 3.0; dz += 1.2) {
+        stripeInstances.push({ x: cx, y: roadY + 0.025, z: cz + dz, sx: 2.0, sz: 0.5, yellow: false });
       }
     }
   }
@@ -357,12 +365,12 @@ export function buildMarketDistrict(textures: ProceduralTextureSet): MarketDistr
   const archBaseY = roadY;
   const archGeo = trackGeo(
     mergeParts([
-      transformGeo(rbox(1.9, 9.2, 1.9, 0.12, TOWN_PALETTE.wallCreamTrim, 1), { pos: [-6.5, 4.6, 0] }),
-      transformGeo(rbox(1.9, 9.2, 1.9, 0.12, TOWN_PALETTE.wallCreamTrim, 1), { pos: [6.5, 4.6, 0] }),
-      transformGeo(rbox(2.4, 0.9, 2.4, 0.1, TOWN_PALETTE.ironworkPlum, 1), { pos: [-6.5, 0.45, 0] }),
-      transformGeo(rbox(2.4, 0.9, 2.4, 0.1, TOWN_PALETTE.ironworkPlum, 1), { pos: [6.5, 0.45, 0] }),
-      transformGeo(rbox(15.2, 2.45, 1.55, 0.12, TOWN_PALETTE.ironworkPlum, 1), { pos: [0, 8.6, 0] }),
-      transformGeo(rbox(15.6, 0.36, 1.85, 0.08, TOWN_PALETTE.brassWarm, 1), { pos: [0, 9.95, 0] }),
+      transformGeo(rbox(1.9, 9.2, 1.9, 0.12, TOWN_PALETTE.wallCreamTrim, 1), { pos: [-12, 4.6, 0] }),
+      transformGeo(rbox(1.9, 9.2, 1.9, 0.12, TOWN_PALETTE.wallCreamTrim, 1), { pos: [12, 4.6, 0] }),
+      transformGeo(rbox(2.4, 0.9, 2.4, 0.1, TOWN_PALETTE.ironworkPlum, 1), { pos: [-12, 0.45, 0] }),
+      transformGeo(rbox(2.4, 0.9, 2.4, 0.1, TOWN_PALETTE.ironworkPlum, 1), { pos: [12, 0.45, 0] }),
+      transformGeo(rbox(26.4, 2.45, 1.55, 0.12, TOWN_PALETTE.ironworkPlum, 1), { pos: [0, 8.6, 0] }),
+      transformGeo(rbox(26.8, 0.36, 1.85, 0.08, TOWN_PALETTE.brassWarm, 1), { pos: [0, 9.95, 0] }),
     ]),
   );
   const archMesh = new THREE.Mesh(archGeo, sculptedMat);
@@ -371,7 +379,7 @@ export function buildMarketDistrict(textures: ProceduralTextureSet): MarketDistr
   archMesh.receiveShadow = true;
   group.add(archMesh);
 
-  const archSignGeo = trackGeo(new THREE.PlaneGeometry(13.6, 2.0));
+  const archSignGeo = trackGeo(new THREE.PlaneGeometry(18.5, 2.0));
   const archSignFront = new THREE.Mesh(archSignGeo, archSignMat);
   archSignFront.position.set(0, archBaseY + 8.6, PARK_HALF + 0.8);
   const archSignBack = new THREE.Mesh(archSignGeo, archSignMat);
@@ -412,7 +420,7 @@ export function buildMarketDistrict(textures: ProceduralTextureSet): MarketDistr
     ),
     sculptedMat,
   );
-  kioskMesh.position.set(-7.2, roadY, 246);
+  kioskMesh.position.set(-12.7, roadY, 248);
   kioskMesh.castShadow = true;
   group.add(kioskMesh);
   // Note: Parked vehicles in Row 0 lots and Main Ave are spawned as interactive drivable rigs in GoKartTrackCanvas.tsx.
@@ -543,10 +551,10 @@ export function buildMarketDistrict(textures: ProceduralTextureSet): MarketDistr
     stallParts.push(mergedStall);
   }
 
-  // Festive bunting banners across Row 0 Col 3 Market Promenade (x = 26.5)
-  for (const bz of [233.5, 242, 250.5, 259]) {
+  // Festive bunting banners across Row 0 Col 3 Market Promenade (x = 32)
+  for (const bz of [235.5, 244, 252.5, 261]) {
     stallParts.push(
-      transformGeo(rbox(15.6, 0.08, 0.08, 0.02, TOWN_PALETTE.ironworkPlum, 1), { pos: [26.5, sidewalkY + 4.25, bz] }),
+      transformGeo(rbox(19.6, 0.08, 0.08, 0.02, TOWN_PALETTE.ironworkPlum, 1), { pos: [32, sidewalkY + 4.25, bz] }),
     );
     const buntCols = [
       TOWN_PALETTE.awningCoral,
@@ -555,22 +563,19 @@ export function buildMarketDistrict(textures: ProceduralTextureSet): MarketDistr
       TOWN_PALETTE.awningCobalt,
       TOWN_PALETTE.sakuraPink,
     ];
-    for (let fi = 0; fi < 7; fi++) {
+    for (let fi = 0; fi < 8; fi++) {
       stallParts.push(
         transformGeo(rbox(0.56, 0.65, 0.08, 0.04, buntCols[fi % buntCols.length], 1), {
           rot: [0, 0, Math.PI * 0.25],
-          pos: [19.8 + fi * 2.2, sidewalkY + 3.85, bz],
+          pos: [23.4 + fi * 2.2, sidewalkY + 3.85, bz],
         }),
       );
     }
   }
 
-  // Market Vendor Push-Carts & Oak Barrels
-  for (const [cx, cz, cyaw, uCol] of [
-    [26.5, 237.5, 0.25, TOWN_PALETTE.awningCoral],
-    [26.5, 255.0, -0.35, TOWN_PALETTE.awningCobalt],
-    [43.2, 246.0, -Math.PI * 0.5, TOWN_PALETTE.awningGold],
-  ] as const) {
+  // Market Vendor Push-Carts & Oak Barrels (shared placement data = solid colliders)
+  for (const cart of TOWN_CART_SPOTS) {
+    const [cx, cz, cyaw, uCol] = [cart.x, cart.z, cart.yaw, cart.canopyColor] as const;
     const cartParts = mergeParts([
       transformGeo(rbox(1.9, 0.85, 1.25, 0.08, TOWN_PALETTE.woodOak, 1), { pos: [0, 0.72, 0] }),
       transformGeo(rcyl(0.36, 0.36, 0.14, TOWN_PALETTE.ironworkPlum, 10), { rot: [Math.PI / 2, 0, 0], pos: [-0.55, 0.36, 0.68] }),
@@ -589,9 +594,12 @@ export function buildMarketDistrict(textures: ProceduralTextureSet): MarketDistr
   group.add(marketMesh);
 
   // Illuminated ATM kiosks
+  const atmScreenMat = trackMat(
+    new THREE.MeshStandardMaterial({ color: 0x38bdf8, emissive: 0x38bdf8, emissiveIntensity: 0.48 }),
+  );
   for (const [ax, az, ayaw] of [
-    [7.2, 246.0, -Math.PI * 0.5],
-    [-7.2, 276.5, Math.PI * 0.5],
+    [12.7, 248.0, -Math.PI * 0.5],
+    [-12.7, 283.5, Math.PI * 0.5],
   ] as const) {
     const atm = new THREE.Group();
     atm.position.set(ax, sidewalkY, az);
@@ -604,7 +612,7 @@ export function buildMarketDistrict(textures: ProceduralTextureSet): MarketDistr
     atmBody.castShadow = true;
     const atmScreen = new THREE.Mesh(
       trackGeo(new THREE.BoxGeometry(0.92, 0.68, 0.1)),
-      trackMat(new THREE.MeshStandardMaterial({ color: 0x38bdf8, emissive: 0x38bdf8, emissiveIntensity: 0.48 })),
+      atmScreenMat,
     );
     atmScreen.position.set(0, 1.62, 0.58);
     atm.add(atmBody, atmScreen);
@@ -651,56 +659,47 @@ export function buildMarketDistrict(textures: ProceduralTextureSet): MarketDistr
     }
   }
 
-  // Row 1 Col 3 Central Botanical Park: Carved 3-Tier Limestone Fountain (x = 26.5, z = 293)
+  // Row 1 Col 3 Central Botanical Park: Carved 3-Tier Limestone Fountain (x = 32, z = 300)
   parkParts.push(
-    transformGeo(rcyl(8.4, 8.6, 0.14, TOWN_PALETTE.plazaWarmStone, 24), { pos: [26.5, sidewalkY + 0.12, 293] }),
-    transformGeo(buildThreeTierFountainStoneGeo(), { pos: [26.5, sidewalkY + 0.18, 293] }),
+    transformGeo(rcyl(8.4, 8.6, 0.14, TOWN_PALETTE.plazaWarmStone, 24), { pos: [32, sidewalkY + 0.12, 300] }),
+    transformGeo(buildThreeTierFountainStoneGeo(), { pos: [32, sidewalkY + 0.18, 300] }),
   );
   // Shimmering water disc & arched water plume (uses reflective waterMat)
   const fountainWater = new THREE.Mesh(trackGeo(new THREE.CylinderGeometry(3.85, 3.85, 0.1, 20)), waterMat);
-  fountainWater.position.set(26.5, sidewalkY + 0.88, 293);
+  fountainWater.position.set(32, sidewalkY + 0.88, 300);
   const fountainSpout = new THREE.Mesh(trackGeo(new THREE.ConeGeometry(0.32, 0.95, 10)), waterMat);
-  fountainSpout.position.set(26.5, sidewalkY + 5.15, 293);
+  fountainSpout.position.set(32, sidewalkY + 5.15, 300);
   group.add(fountainWater, fountainSpout);
 
-  // Row 2 Col 3 South Park: Octagonal Timber Gazebo (x = 26.5, z = 338.5)
+  // Row 2 Col 3 South Park: Octagonal Timber Gazebo (x = 32, z = 348)
   parkParts.push(
-    transformGeo(rcyl(6.8, 7.0, 0.14, TOWN_PALETTE.plazaWarmStone, 18), { pos: [26.5, sidewalkY + 0.12, 338.5] }),
-    transformGeo(rcyl(4.1, 4.3, 0.32, TOWN_PALETTE.woodOak, 8), { pos: [26.5, sidewalkY + 0.32, 338.5] }),
-    transformGeo(rcyl(0.25, 4.65, 2.2, TOWN_PALETTE.roofTerracotta, 8), { pos: [26.5, sidewalkY + 4.75, 338.5] }),
-    transformGeo(smoothSphere(0.38, TOWN_PALETTE.roofCopperPatina, 10, 8), { pos: [26.5, sidewalkY + 5.95, 338.5] }),
+    transformGeo(rcyl(6.8, 7.0, 0.14, TOWN_PALETTE.plazaWarmStone, 18), { pos: [32, sidewalkY + 0.12, 348] }),
+    transformGeo(rcyl(4.1, 4.3, 0.32, TOWN_PALETTE.woodOak, 8), { pos: [32, sidewalkY + 0.32, 348] }),
+    transformGeo(rcyl(0.25, 4.65, 2.2, TOWN_PALETTE.roofTerracotta, 8), { pos: [32, sidewalkY + 4.75, 348] }),
+    transformGeo(smoothSphere(0.38, TOWN_PALETTE.roofCopperPatina, 10, 8), { pos: [32, sidewalkY + 5.95, 348] }),
   );
   for (let i = 0; i < 6; i++) {
     const a = (i / 6) * Math.PI * 2;
     parkParts.push(
       transformGeo(rcyl(0.14, 0.16, 3.3, TOWN_PALETTE.woodBirch, 8), {
-        pos: [26.5 + Math.cos(a) * 3.35, sidewalkY + 2.0, 338.5 + Math.sin(a) * 3.35],
+        pos: [32 + Math.cos(a) * 3.35, sidewalkY + 2.0, 348 + Math.sin(a) * 3.35],
       }),
     );
   }
 
-  // Row 2 Col 1 West Pocket Park: Clock Obelisk (x = -77, z = 338.5)
+  // Row 2 Col 1 West Pocket Park: Clock Obelisk (x = -88, z = 348)
   parkParts.push(
-    transformGeo(rcyl(5.4, 5.6, 0.14, TOWN_PALETTE.plazaWarmStone, 16), { pos: [-77, sidewalkY + 0.12, 338.5] }),
-    transformGeo(rbox(2.8, 0.7, 2.8, 0.1, TOWN_PALETTE.wallLimestone, 1), { pos: [-77, sidewalkY + 0.5, 338.5] }),
-    transformGeo(rcyl(0.45, 0.8, 4.8, TOWN_PALETTE.wallCreamTrim, 4), { rot: [0, Math.PI * 0.25, 0], pos: [-77, sidewalkY + 3.25, 338.5] }),
-    transformGeo(smoothSphere(0.46, TOWN_PALETTE.brassWarm, 10, 8), { pos: [-77, sidewalkY + 5.85, 338.5] }),
+    transformGeo(rcyl(5.4, 5.6, 0.14, TOWN_PALETTE.plazaWarmStone, 16), { pos: [-88, sidewalkY + 0.12, 348] }),
+    transformGeo(rbox(2.8, 0.7, 2.8, 0.1, TOWN_PALETTE.wallLimestone, 1), { pos: [-88, sidewalkY + 0.5, 348] }),
+    transformGeo(rcyl(0.45, 0.8, 4.8, TOWN_PALETTE.wallCreamTrim, 4), { rot: [0, Math.PI * 0.25, 0], pos: [-88, sidewalkY + 3.25, 348] }),
+    transformGeo(smoothSphere(0.46, TOWN_PALETTE.brassWarm, 10, 8), { pos: [-88, sidewalkY + 5.85, 348] }),
   );
 
-  // Curved-slat sculpted Paris-green & Oak Park Benches
+  // Curved-slat sculpted Paris-green & Oak Park Benches (shared data, solid)
   const benchBaseGeo = buildParkBenchGeo(TOWN_PALETTE.woodOak);
-  const benchCoords: Array<[number, number, number]> = [
-    [20.2, 286.8, Math.PI * 0.25],
-    [32.8, 286.8, -Math.PI * 0.25],
-    [20.2, 299.2, Math.PI * 0.75],
-    [32.8, 299.2, -Math.PI * 0.75],
-    [13.5, 290.0, 0],
-    [39.5, 290.0, 0],
-    [18.5, 333.0, Math.PI * 0.5],
-    [34.5, 344.0, -Math.PI * 0.5],
-    [-71.0, 334.0, Math.PI * 0.5],
-    [-83.0, 343.0, -Math.PI * 0.5],
-  ];
+  const benchCoords: Array<[number, number, number]> = TOWN_BENCH_SPOTS.map(
+    (b) => [b.x, b.z, b.yaw] as [number, number, number],
+  );
   for (const [bx, bz, byaw] of benchCoords) {
     const bClone = benchBaseGeo.clone();
     transformGeo(bClone, { rot: [0, byaw, 0], pos: [bx, sidewalkY + 0.16, bz] });
@@ -710,14 +709,14 @@ export function buildMarketDistrict(textures: ProceduralTextureSet): MarketDistr
 
   // Brick-bordered Botanical Flowerbeds with dense tulip/lavender blooms
   const bedCoords: Array<[number, number, number]> = [
-    [14.5, 282.0, TOWN_PALETTE.tulipCoral],
-    [38.5, 282.0, TOWN_PALETTE.tulipYellow],
-    [14.5, 304.0, TOWN_PALETTE.lavenderSprig],
-    [38.5, 304.0, TOWN_PALETTE.sakuraPink],
-    [14.5, 327.0, TOWN_PALETTE.tulipYellow],
-    [38.5, 349.5, TOWN_PALETTE.tulipCoral],
-    [-65.0, 327.0, TOWN_PALETTE.sakuraPink],
-    [-89.0, 349.5, TOWN_PALETTE.tulipYellow],
+    [19, 286.0, TOWN_PALETTE.tulipCoral],
+    [45, 286.0, TOWN_PALETTE.tulipYellow],
+    [19, 312.0, TOWN_PALETTE.lavenderSprig],
+    [45, 312.0, TOWN_PALETTE.sakuraPink],
+    [19, 334.0, TOWN_PALETTE.tulipYellow],
+    [45, 358.0, TOWN_PALETTE.tulipCoral],
+    [-74.5, 334.0, TOWN_PALETTE.sakuraPink],
+    [-101, 358.0, TOWN_PALETTE.tulipYellow],
   ];
   for (const [fx, fz, fCol] of bedCoords) {
     parkParts.push(
@@ -743,37 +742,42 @@ export function buildMarketDistrict(textures: ProceduralTextureSet): MarketDistr
   // =========================================================================
   const streetFurnitureParts: THREE.BufferGeometry[] = [];
 
-  // Café outdoor patio umbrellas & tables outside Row 1 Col 2 Main Ave Café (x = -7.2, z = 282..298)
-  for (const pz of [282, 289, 296]) {
-    const uCol = pz === 289 ? TOWN_PALETTE.awningCobalt : TOWN_PALETTE.awningCoral;
+  // Café outdoor patio umbrellas & tables outside Row 1 Col 2 Main Ave Café (x = -11.8, z = 284..298)
+  for (const pz of [284, 291, 298]) {
+    const uCol = pz === 291 ? TOWN_PALETTE.awningCobalt : TOWN_PALETTE.awningCoral;
     streetFurnitureParts.push(
-      transformGeo(rcyl(0.06, 0.08, 2.45, TOWN_PALETTE.ironworkPlum, 6), { pos: [-7.0, sidewalkY + 1.22, pz] }),
-      transformGeo(rcyl(0.88, 0.88, 0.09, TOWN_PALETTE.wallCreamTrim, 12), { pos: [-7.0, sidewalkY + 0.82, pz] }),
-      transformGeo(rcyl(0.12, 1.65, 0.68, uCol, 8), { pos: [-7.0, sidewalkY + 2.58, pz] }),
+      transformGeo(rcyl(0.06, 0.08, 2.45, TOWN_PALETTE.ironworkPlum, 6), { pos: [-11.8, sidewalkY + 1.22, pz] }),
+      transformGeo(rcyl(0.88, 0.88, 0.09, TOWN_PALETTE.wallCreamTrim, 12), { pos: [-11.8, sidewalkY + 0.82, pz] }),
+      transformGeo(rcyl(0.12, 1.65, 0.68, uCol, 8), { pos: [-11.8, sidewalkY + 2.58, pz] }),
     );
   }
 
-  // Sculpted Bus Stop Shelter on West Shop Street (Row 2 Col 2 edge, x = -47.2, z = 338.5)
+  // Sculpted Bus Stop Shelter on West Shop Street (Row 2 Col 2 edge, x = -52.7, z = 348)
   streetFurnitureParts.push(
-    transformGeo(rbox(0.18, 2.75, 5.2, 0.05, TOWN_PALETTE.windowSkyGlass, 1), { pos: [-46.6, sidewalkY + 1.38, 338.5] }),
-    transformGeo(rbox(2.1, 0.2, 5.6, 0.08, TOWN_PALETTE.awningCobalt, 1), { pos: [-47.2, sidewalkY + 2.82, 338.5] }),
-    transformGeo(rbox(0.58, 0.14, 3.6, 0.04, TOWN_PALETTE.woodOak, 1), { pos: [-47.0, sidewalkY + 0.56, 338.5] }),
-    transformGeo(rcyl(0.08, 0.08, 3.1, TOWN_PALETTE.ironworkPlum, 6), { pos: [-47.5, sidewalkY + 1.55, 341.8] }),
-    transformGeo(rbox(0.14, 0.85, 0.85, 0.04, TOWN_PALETTE.awningGold, 1), { pos: [-47.5, sidewalkY + 2.85, 341.8] }),
+    transformGeo(rbox(0.18, 2.75, 5.2, 0.05, TOWN_PALETTE.windowSkyGlass, 1), { pos: [-52.1, sidewalkY + 1.38, 348] }),
+    transformGeo(rbox(2.1, 0.2, 5.6, 0.08, TOWN_PALETTE.awningCobalt, 1), { pos: [-52.7, sidewalkY + 2.82, 348] }),
+    transformGeo(rbox(0.58, 0.14, 3.6, 0.04, TOWN_PALETTE.woodOak, 1), { pos: [-52.5, sidewalkY + 0.56, 348] }),
+    transformGeo(rcyl(0.08, 0.08, 3.1, TOWN_PALETTE.ironworkPlum, 6), { pos: [-53.0, sidewalkY + 1.55, 351.3] }),
+    transformGeo(rbox(0.14, 0.85, 0.85, 0.04, TOWN_PALETTE.awningGold, 1), { pos: [-53.0, sidewalkY + 2.85, 351.3] }),
   );
 
-  // Planters along Main Avenue edges (z = 232..392)
-  for (const pz of [232, 248, 260, 278, 306, 326, 348, 374, 396]) {
-    for (const px of [-6.0, 6.0]) {
-      if (px < 0 && pz >= 278 && pz <= 300) continue; // Keep clear for Café patio
-      if (px < 0 && pz >= 230 && pz <= 262) continue; // Keep clear for Parking lot
-      streetFurnitureParts.push(
-        transformGeo(rbox(1.35, 0.58, 1.35, 0.08, TOWN_PALETTE.brickTerracotta, 1), { pos: [px, sidewalkY + 0.29, pz] }),
-        transformGeo(smoothSphere(0.62, pz % 16 === 0 ? TOWN_PALETTE.leafSage : TOWN_PALETTE.grassSunlit, 8, 6), {
-          pos: [px, sidewalkY + 0.84, pz],
-        }),
-      );
-    }
+  // Brick street planters along Main Avenue (shared data = solid colliders)
+  for (const planter of TOWN_PLANTER_SPOTS) {
+    if (planter.x < 0 && planter.z >= 280 && planter.z <= 302) continue; // Keep clear for Café patio
+    streetFurnitureParts.push(
+      transformGeo(rbox(1.35, 0.58, 1.35, 0.08, TOWN_PALETTE.brickTerracotta, 1), {
+        pos: [planter.x, sidewalkY + 0.29, planter.z],
+      }),
+      transformGeo(
+        smoothSphere(
+          0.62,
+          planter.tone === 'sage' ? TOWN_PALETTE.leafSage : TOWN_PALETTE.grassSunlit,
+          8,
+          6,
+        ),
+        { pos: [planter.x, sidewalkY + 0.84, planter.z] },
+      ),
+    );
   }
 
   const furnitureMesh = new THREE.Mesh(trackGeo(mergeParts(streetFurnitureParts)), sculptedMat);
@@ -781,15 +785,15 @@ export function buildMarketDistrict(textures: ProceduralTextureSet): MarketDistr
   furnitureMesh.receiveShadow = true;
   group.add(furnitureMesh);
 
-  // Victorian Streetlamps (InstancedMesh)
+  // Victorian Streetlamps (InstancedMesh) along the wide avenues
   const streetLightCoords: Array<[number, number, number]> = [];
-  for (const sz of [217, 238, 262, 284, 310, 338, 368, 396]) {
-    streetLightCoords.push([-5.3, sz, Math.PI * 0.5]);
-    streetLightCoords.push([5.3, sz, -Math.PI * 0.5]);
+  for (const sz of [219, 244, 268, 290, 316, 344, 374, 402]) {
+    streetLightCoords.push([-11.6, sz, Math.PI * 0.5]);
+    streetLightCoords.push([11.6, sz, -Math.PI * 0.5]);
   }
-  for (const sx of [-126, -77, -26.5, 26.5, 77, 126]) {
-    streetLightCoords.push([sx, 265.2, 0]);
-    streetLightCoords.push([sx, 357.8, 0]);
+  for (const sx of [-138, -88, -32, 32, 88, 138]) {
+    streetLightCoords.push([sx, 274, 0]);
+    streetLightCoords.push([sx, 374, 0]);
   }
 
   const lampPostGeo = trackGeo(buildVictorianLampPostGeo());
@@ -819,32 +823,7 @@ export function buildMarketDistrict(textures: ProceduralTextureSet): MarketDistr
   const sakuraTreeGeo = trackGeo(buildOrganicTreeGeo(7.6, TOWN_PALETTE.sakuraPink, 2.4));
   const ginkgoTreeGeo = trackGeo(buildOrganicTreeGeo(7.8, TOWN_PALETTE.ginkgoGold, 3.7));
 
-  const treeSpots: Array<{ x: number; z: number; scale: number; yaw: number; kind: 'oak' | 'sakura' | 'ginkgo' }> = [
-    // Botanical Fountain Park (Row 1 Col 3) corners
-    { x: 11.5, z: 279.0, scale: 1.02, yaw: 0.4, kind: 'sakura' },
-    { x: 41.5, z: 279.0, scale: 0.96, yaw: 1.5, kind: 'oak' },
-    { x: 11.5, z: 307.0, scale: 1.0, yaw: 2.3, kind: 'ginkgo' },
-    { x: 41.5, z: 307.0, scale: 1.05, yaw: 0.9, kind: 'sakura' },
-    // South Gazebo Park (Row 2 Col 3)
-    { x: 11.5, z: 324.5, scale: 0.98, yaw: 1.1, kind: 'oak' },
-    { x: 41.5, z: 324.5, scale: 0.95, yaw: 2.7, kind: 'ginkgo' },
-    { x: 11.5, z: 352.5, scale: 1.04, yaw: 0.2, kind: 'sakura' },
-    { x: 41.5, z: 352.5, scale: 1.0, yaw: 1.9, kind: 'oak' },
-    // West Pocket Park (Row 2 Col 1)
-    { x: -91.5, z: 324.5, scale: 0.95, yaw: 0.8, kind: 'sakura' },
-    { x: -62.5, z: 324.5, scale: 1.0, yaw: 2.1, kind: 'oak' },
-    { x: -91.5, z: 352.5, scale: 0.96, yaw: 1.4, kind: 'ginkgo' },
-    { x: -62.5, z: 352.5, scale: 1.02, yaw: 2.9, kind: 'oak' },
-    // Courtyard & Avenue Street Trees
-    { x: -126.5, z: 246.0, scale: 0.92, yaw: 0.6, kind: 'sakura' },
-    { x: -77.0, z: 246.0, scale: 0.9, yaw: 1.7, kind: 'ginkgo' },
-    { x: 126.5, z: 246.0, scale: 0.94, yaw: 2.4, kind: 'oak' },
-    { x: 77.0, z: 293.0, scale: 0.92, yaw: 0.5, kind: 'sakura' },
-    { x: 77.0, z: 338.5, scale: 0.95, yaw: 1.8, kind: 'oak' },
-    { x: -126.5, z: 338.5, scale: 0.92, yaw: 2.2, kind: 'ginkgo' },
-    { x: -126.5, z: 385.5, scale: 0.96, yaw: 0.9, kind: 'oak' },
-    { x: 126.5, z: 385.5, scale: 0.98, yaw: 2.6, kind: 'sakura' },
-  ];
+  const treeSpots = TOWN_TREE_SPOTS;
 
   const buildTreeInst = (kind: 'oak' | 'sakura' | 'ginkgo', geo: THREE.BufferGeometry) => {
     const subset = treeSpots.filter((t) => t.kind === kind);
@@ -884,11 +863,15 @@ export function buildMarketDistrict(textures: ProceduralTextureSet): MarketDistr
 
   return {
     group,
-    update: (elapsedSeconds: number) => {
+    update: (elapsedSeconds: number, nightFactor = 0) => {
       const pulse = 1 + Math.sin(elapsedSeconds * 5.2) * 0.14;
       fountainSpout.scale.set(1 + Math.cos(elapsedSeconds * 4.4) * 0.08, pulse, 1 + Math.cos(elapsedSeconds * 4.4) * 0.08);
       fountainSpout.position.y = sidewalkY + 5.12 + (pulse - 1) * 0.22;
       fountainWater.rotation.y = elapsedSeconds * 0.28;
+      // Daylight cycle: street lamps & screens glow once the sun sets
+      const glow = 0.12 + nightFactor * 1.15;
+      lampGlowMat.emissiveIntensity = glow;
+      atmScreenMat.emissiveIntensity = 0.1 + nightFactor * 0.75;
     },
     dispose: () => {
       streetDetails.dispose();

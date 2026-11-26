@@ -20,6 +20,8 @@ export interface CharacterMeshRig {
 export function buildCharacterMesh(contactShadowTexture: THREE.Texture): CharacterMeshRig {
   const group = new THREE.Group();
   group.name = 'PLAYER_CHARACTER';
+  // Realistic human proportions against the enlarged town (≈1.85 m tall)
+  group.scale.setScalar(0.86);
 
   const geometries: THREE.BufferGeometry[] = [];
   const materials: THREE.Material[] = [];
@@ -182,7 +184,7 @@ export function buildCharacterMesh(contactShadowTexture: THREE.Texture): Charact
     leftLegPivot,
     rightLegPivot,
     setWalkPose: (walkCycle: number, speed: number) => {
-      const amp = Math.min(1, Math.abs(speed) / 8.0) * 0.65;
+      const amp = Math.min(1, Math.abs(speed) / 2.5) * 0.65;
       const swing = Math.sin(walkCycle) * amp;
       leftLegPivot.rotation.x = swing;
       rightLegPivot.rotation.x = -swing;

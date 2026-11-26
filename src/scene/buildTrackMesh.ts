@@ -113,7 +113,7 @@ function buildCornerKerbGeometry(
     for (let i = 0; i < n; i++) {
       const fA = frames[i];
       // Keep South Gate spur junction around x ~ 0, z ~ 92 free on outer (+Z) edge
-      if (Math.abs(fA.position.x) < 9.5 && fA.position.z > 84) {
+      if (Math.abs(fA.position.x) < 15.5 && fA.position.z > 84) {
         continue;
       }
 

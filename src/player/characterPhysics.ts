@@ -28,14 +28,14 @@ export interface VehicleProximityTarget {
 }
 
 export const CHARACTER_PHYSICS = {
-  walkSpeed: 9.2,
-  sprintSpeed: 15.0,
-  backwardSpeed: 5.6,
-  turnRate: 2.85,
-  accelRate: 36,
-  decelRate: 32,
-  radius: 0.56,
-  enterRange: 5.8,
+  walkSpeed: 4.6,
+  sprintSpeed: 8.4,
+  backwardSpeed: 2.6,
+  turnRate: 2.4,
+  accelRate: 24,
+  decelRate: 22,
+  radius: 0.5,
+  enterRange: 6.2,
 } as const;
 
 /**
