@@ -74,15 +74,23 @@ test('kart drives freely along town road and straight through open South Stadium
   assert.ok(state.speed > 15, `Kart should remain at driving speed on track spur, got ${state.speed.toFixed(2)}`);
 });
 
-test('town includes small side roads and multiple lanes', () => {
-  const smallRoads = TOWN_ROADS.filter((r) => {
+test('town includes wide GTA-scale main roads plus narrower side lanes', () => {
+  const widths = TOWN_ROADS.map((r) => (r.axis === 'ns' ? r.xMax - r.xMin : r.zMax - r.zMin));
+  const mainRoads = TOWN_ROADS.filter((r) => {
     const width = r.axis === 'ns' ? r.xMax - r.xMin : r.zMax - r.zMin;
-    return width <= 6.5;
+    return width >= 18;
   });
-  const twoLaneRoads = TOWN_ROADS.filter((r) => r.lanes === 2);
+  const sideLanes = TOWN_ROADS.filter((r) => {
+    const width = r.axis === 'ns' ? r.xMax - r.xMin : r.zMax - r.zMin;
+    return width <= 9;
+  });
+  const twoLaneRoads = TOWN_ROADS.filter((r) => r.lanes >= 2);
+  const narrowest = Math.min(...widths);
 
-  assert.ok(smallRoads.length >= 6, 'Town should have multiple small narrow roads/alleys');
-  assert.ok(twoLaneRoads.length >= 4, 'Town should have multiple two-lane streets');
+  assert.ok(mainRoads.length >= 1, 'Town should have at least one wide main avenue');
+  assert.ok(sideLanes.length >= 5, 'Town should keep several narrower side lanes');
+  assert.ok(twoLaneRoads.length >= 6, 'Major streets should carry two lanes or more');
+  assert.ok(narrowest >= 8, 'Even neighborhood lanes stay GTA-scale generous (>= 8 units)');
 });
 
 test('ground elevation ramps smoothly from town road up to stadium field', () => {
@@ -139,17 +147,22 @@ test('interior AABB ejection, wall velocity projection, and banner/archway colli
     `Head-on wall contact must kill forward speed instead of phantom speed, got ${ramState.speed.toFixed(2)}`,
   );
 
-  // 3. Welcome Archway pier at x = -6.5, z = 212 blocks penetration while center road (x = 0) is open
+  // 3. Welcome Archway stone pier at x = -12, z = 212 blocks penetration while center road (x = 0) is open
   const pierHit = stepKartPhysics(
-    { ...createInitialKartState(curve), x: -6.5, z: 213.8, yaw: Math.PI, speed: 16 },
+    { ...createInitialKartState(curve), x: -12, z: 213.8, yaw: Math.PI, speed: 16 },
     { accelerate: true, brakeReverse: false, steerLeft: false, steerRight: false },
     0.05,
     frames,
   );
   assert.ok(
-    Math.hypot(pierHit.x - -6.5, pierHit.z - 212.0) > 1.4,
+    Math.hypot(pierHit.x - -12, pierHit.z - 212.0) > 1.4,
     'Welcome Archway stone pier must collide cleanly with vehicles',
   );
+  let clearRun = { ...createInitialKartState(curve), x: 0, z: 213.8, yaw: Math.PI, speed: 16 };
+  for (let i = 0; i < 3; i++) {
+    clearRun = stepKartPhysics(clearRun, { accelerate: true, brakeReverse: false, steerLeft: false, steerRight: false }, 0.05, frames);
+  }
+  assert.ok(clearRun.z < 212.4, 'Center of the widened gate must stay open for vehicles');
 });
 
 test('handbrake slides scrub speed and releasing the handbrake never awards free turbo', () => {

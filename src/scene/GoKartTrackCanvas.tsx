@@ -60,6 +60,7 @@ import { buildCheckpointMarkers } from './buildCheckpoints';
 import { buildMarketDistrict } from './buildMarketDistrict';
 import { buildStadiumArchitecture } from './buildStadium';
 import { buildTrackEnvironment } from './buildTrackMesh';
+import { DayNightCycle, DayNightSample } from './dayNight';
 import { createProceduralTextures } from './textures';
 import { getWorldGroundSlope, getWorldGroundY } from './townLayout';
 import { VehicleEffectsSystem } from './vehicleEffects';
@@ -86,7 +87,13 @@ function detectSoftwareWebGL(): boolean {
   return cachedSoftwareWebGL;
 }
 
-function createAtmosphericEffects(scene: THREE.Scene): () => void {
+export interface AtmosphericEffectsHandle {
+  sunSprite: THREE.Sprite;
+  moonSprite: THREE.Sprite;
+  dispose: () => void;
+}
+
+function createAtmosphericEffects(scene: THREE.Scene): AtmosphericEffectsHandle {
   const canvas = document.createElement('canvas');
   canvas.width = 128;
   canvas.height = 128;
@@ -108,8 +115,32 @@ function createAtmosphericEffects(scene: THREE.Scene): () => void {
   });
   const sunSprite = new THREE.Sprite(flareMat);
   sunSprite.position.set(-165, 280, 195);
-  sunSprite.scale.set(130, 130, 1);
+  sunSprite.scale.set(150, 150, 1);
   scene.add(sunSprite);
+
+  // Pale moon disc that rises at night opposite the sun
+  const moonCanvas = document.createElement('canvas');
+  moonCanvas.width = 64;
+  moonCanvas.height = 64;
+  const mCtx = moonCanvas.getContext('2d')!;
+  const mGrad = mCtx.createRadialGradient(32, 32, 0, 32, 32, 32);
+  mGrad.addColorStop(0, 'rgba(226, 236, 255, 0.95)');
+  mGrad.addColorStop(0.35, 'rgba(200, 214, 244, 0.55)');
+  mGrad.addColorStop(1, 'rgba(160, 180, 224, 0)');
+  mCtx.fillStyle = mGrad;
+  mCtx.fillRect(0, 0, 64, 64);
+  const moonTex = new THREE.CanvasTexture(moonCanvas);
+  const moonMat = new THREE.SpriteMaterial({
+    map: moonTex,
+    transparent: true,
+    blending: THREE.AdditiveBlending,
+    depthWrite: false,
+  });
+  const moonSprite = new THREE.Sprite(moonMat);
+  moonSprite.position.set(165, 260, -195);
+  moonSprite.scale.set(90, 90, 1);
+  moonSprite.visible = false;
+  scene.add(moonSprite);
 
   const cloudCount = 20;
   const cloudGeo = new THREE.BufferGeometry();
@@ -149,14 +180,21 @@ function createAtmosphericEffects(scene: THREE.Scene): () => void {
   const cloudPoints = new THREE.Points(cloudGeo, cloudMat);
   scene.add(cloudPoints);
 
-  return () => {
-    flareTex.dispose();
-    flareMat.dispose();
-    scene.remove(sunSprite);
-    cloudGeo.dispose();
-    cloudTex.dispose();
-    cloudMat.dispose();
-    scene.remove(cloudPoints);
+  return {
+    sunSprite,
+    moonSprite,
+    dispose: () => {
+      flareTex.dispose();
+      flareMat.dispose();
+      scene.remove(sunSprite);
+      moonTex.dispose();
+      moonMat.dispose();
+      scene.remove(moonSprite);
+      cloudGeo.dispose();
+      cloudTex.dispose();
+      cloudMat.dispose();
+      scene.remove(cloudPoints);
+    },
   };
 }
 
@@ -171,6 +209,8 @@ interface GoKartTrackCanvasProps {
   cameraMode: CameraMode;
   perspective: FollowPerspective;
   isMuted: boolean;
+  isPaused: boolean;
+  pauseTick: number;
   spectatorResetTick: number;
   restartRaceTick: number;
   vehicleInteractTick: number;
@@ -178,6 +218,7 @@ interface GoKartTrackCanvasProps {
   freeCamTouchInputRef: MutableRefObject<FreeCameraInputState>;
   onRaceStateChange: (state: RaceState) => void;
   onPlayerInfoChange: (info: PlayerHudInfo) => void;
+  onDayNightChange: (sample: DayNightSample) => void;
   onSelectPerspective: (perspective: FollowPerspective) => void;
   onCyclePerspective: () => void;
   onToggleFollow: () => void;
@@ -190,6 +231,8 @@ export function GoKartTrackCanvas({
   cameraMode,
   perspective,
   isMuted,
+  isPaused,
+  pauseTick,
   spectatorResetTick,
   restartRaceTick,
   vehicleInteractTick,
@@ -197,6 +240,7 @@ export function GoKartTrackCanvas({
   freeCamTouchInputRef,
   onRaceStateChange,
   onPlayerInfoChange,
+  onDayNightChange,
   onSelectPerspective,
   onCyclePerspective,
   onToggleFollow,
@@ -211,6 +255,7 @@ export function GoKartTrackCanvas({
   const cameraModeRef = useRef<CameraMode>(cameraMode);
   const perspectiveRef = useRef<FollowPerspective>(perspective);
   const isMutedRef = useRef<boolean>(isMuted);
+  const isPausedRef = useRef<boolean>(isPaused);
   const spectatorResetTickRef = useRef<number>(spectatorResetTick);
   const restartRaceTickRef = useRef<number>(restartRaceTick);
   const vehicleInteractTickRef = useRef<number>(vehicleInteractTick);
@@ -218,6 +263,7 @@ export function GoKartTrackCanvas({
 
   const onRaceStateChangeRef = useRef(onRaceStateChange);
   const onPlayerInfoChangeRef = useRef(onPlayerInfoChange);
+  const onDayNightChangeRef = useRef(onDayNightChange);
   const onSelectPerspectiveRef = useRef(onSelectPerspective);
   const onCyclePerspectiveRef = useRef(onCyclePerspective);
   const onToggleFollowRef = useRef(onToggleFollow);
@@ -245,6 +291,10 @@ export function GoKartTrackCanvas({
   }, [isMuted]);
 
   useEffect(() => {
+    isPausedRef.current = isPaused;
+  }, [isPaused]);
+
+  useEffect(() => {
     spectatorResetTickRef.current = spectatorResetTick;
   }, [spectatorResetTick]);
 
@@ -256,6 +306,11 @@ export function GoKartTrackCanvas({
     vehicleInteractTickRef.current = vehicleInteractTick;
   }, [vehicleInteractTick]);
 
+  const pauseTickRef = useRef<number>(pauseTick);
+  useEffect(() => {
+    pauseTickRef.current = pauseTick;
+  }, [pauseTick]);
+
   useEffect(() => {
     onRaceStateChangeRef.current = onRaceStateChange;
   }, [onRaceStateChange]);
@@ -263,6 +318,10 @@ export function GoKartTrackCanvas({
   useEffect(() => {
     onPlayerInfoChangeRef.current = onPlayerInfoChange;
   }, [onPlayerInfoChange]);
+
+  useEffect(() => {
+    onDayNightChangeRef.current = onDayNightChange;
+  }, [onDayNightChange]);
 
   useEffect(() => {
     onSelectPerspectiveRef.current = onSelectPerspective;
@@ -349,9 +408,13 @@ export function GoKartTrackCanvas({
       ? 1
       : Math.min(renderer.capabilities.getMaxAnisotropy(), 8);
     const textures = createProceduralTextures(maxAnisotropy);
-    scene.background = textures.skyBackdrop;
 
-    // Bright, soft daylight lighting rig covering both stadium and town district
+    // Full daylight cycle: dynamic sky gradient, moving sun & moon, lamp glow
+    const dayNight = new DayNightCycle(0.07);
+    const dayNightSampleScratch: DayNightSample = { nightFactor: 0, duskGlow: 0, clockLabel: '09:40' };
+    scene.background = dayNight.skyTexture;
+
+    // Daylight lighting rig covering both stadium and town district (cycle-driven)
     const hemiLight = new THREE.HemisphereLight(0xdce5ec, 0x716951, 0.8);
     hemiLight.position.set(0, 180, 0);
     scene.add(hemiLight);
@@ -377,7 +440,51 @@ export function GoKartTrackCanvas({
     fillLight.position.set(160, 120, -150);
     scene.add(fillLight);
 
-    const disposeAtmosphere = createAtmosphericEffects(scene);
+    const atmosphere = createAtmosphericEffects(scene);
+    const disposeAtmosphere = () => atmosphere.dispose();
+
+    const applyDayNight = (dt: number) => {
+      const sample = dayNight.update(dt, dayNightSampleScratch);
+      dayNight.paintSky();
+
+      sunLight.position.copy(dayNight.sunDirection).multiplyScalar(360);
+      sunLight.position.y = Math.max(60, sunLight.position.y);
+      sunLight.position.z += 110;
+      sunLight.intensity = dayNight.sunIntensity;
+      sunLight.color.copy(dayNight.sunColor);
+
+      hemiLight.intensity = dayNight.hemiIntensity;
+      hemiLight.color.copy(dayNight.hemiSkyColor);
+      hemiLight.groundColor.copy(dayNight.hemiGroundColor);
+
+      fillLight.position.set(-dayNight.sunDirection.x * 300, 220, -dayNight.sunDirection.z * 300);
+      fillLight.intensity = dayNight.fillIntensity;
+      fillLight.color.copy(dayNight.fillColor);
+
+      renderer.toneMappingExposure = dayNight.exposure;
+      scene.environmentIntensity = dayNight.environmentIntensity;
+      horizonFog.color.copy(dayNight.fogColor);
+
+      atmosphere.sunSprite.position.copy(dayNight.sunDirection).multiplyScalar(1350);
+      atmosphere.sunSprite.position.y = Math.max(-80, atmosphere.sunSprite.position.y);
+      (atmosphere.sunSprite.material as THREE.SpriteMaterial).opacity = dayNight.sunOpacity;
+      atmosphere.sunSprite.visible = dayNight.sunOpacity > 0.02;
+
+      atmosphere.moonSprite.position
+        .copy(dayNight.sunDirection)
+        .multiplyScalar(-1250)
+        .setY(Math.max(160, -dayNight.sunDirection.y * 900));
+      atmosphere.moonSprite.position.z -= 250;
+      (atmosphere.moonSprite.material as THREE.SpriteMaterial).opacity = dayNight.moonOpacity;
+      atmosphere.moonSprite.visible = dayNight.moonOpacity > 0.02;
+
+      return sample;
+    };
+
+    // Initial paint so the very first frame already matches the cycle
+    dayNight.sample(dayNightSampleScratch);
+    dayNight.paintSky();
+    applyDayNight(0);
 
     // Track curve, stadium, town district, banners & 3D checkpoint markers
     const curve = createTrackCurve();
@@ -467,7 +574,6 @@ export function GoKartTrackCanvas({
         };
         alignVehiclePose(v);
         v.rig.driverGroup.visible = false;
-        v.rig.highlightRing.visible = false;
         v.rig.setBrakeLights(false);
       }
       vehicleEffects.reset();
@@ -568,6 +674,7 @@ export function GoKartTrackCanvas({
     let prevResetTick = spectatorResetTickRef.current;
     let prevRestartTick = restartRaceTickRef.current;
     let prevInteractTick = vehicleInteractTickRef.current;
+    let prevPauseTick = pauseTickRef.current;
 
     let lastHudSyncAt = 0;
     let lastHudStatus = raceState.status;
@@ -856,6 +963,8 @@ export function GoKartTrackCanvas({
 
     const clock = new THREE.Clock();
     let elapsedSimSeconds = 0;
+    let lastNightFactor = -1;
+    let lastClockLabel = '';
 
     const mergedKartInput: KartInputState = {
       accelerate: false,
@@ -898,6 +1007,7 @@ export function GoKartTrackCanvas({
       const focusSpeed = activeVeh ? activeVeh.state.speed : charState.speed;
 
       container.setAttribute('data-camera-mode', mode);
+      container.setAttribute('data-paused', String(isPausedRef.current));
       container.setAttribute('data-perspective', activePersp);
       container.setAttribute('data-player-mode', charState.mode);
       container.setAttribute('data-vehicle-id', activeVeh ? activeVeh.instanceId : 'none');
@@ -919,6 +1029,20 @@ export function GoKartTrackCanvas({
       container.setAttribute('data-race-cp', String(raceState.currentCheckpointIndex));
     }
 
+    const idleAudioState = {
+      isDriving: false,
+      bodyStyle: 'kart' as const,
+      speed: 0,
+      maxSpeed: 10,
+      throttle: false,
+      braking: false,
+      lateralSlip: 0,
+      isDrifting: false,
+      onKerb: false,
+      onAsphalt: true,
+      walkingSpeed: 0,
+    };
+
     function tick() {
       if (disposed) return;
 
@@ -927,8 +1051,21 @@ export function GoKartTrackCanvas({
         return;
       }
 
-      // Preserve real-time 1.0x simulation speed even on 10-20 FPS software renderers via sub-stepping
       const rawDt = clock.getDelta();
+
+      // Pause menu: freeze the whole simulation, keep rendering the frozen frame
+      if (isPausedRef.current) {
+        soundEngine.update(idleAudioState, Math.min(rawDt, 0.25));
+        renderer.render(scene, camera);
+        if (isSoftwareGl) {
+          afterDraw(tick);
+        } else {
+          frameId = requestAnimationFrame(tick);
+        }
+        return;
+      }
+
+      // Preserve real-time 1.0x simulation speed even on 10-20 FPS software renderers via sub-stepping
       const frameDt = Math.min(rawDt, 0.25);
       const subSteps = Math.max(1, Math.ceil(frameDt / 0.05));
       const stepDt = frameDt / subSteps;
@@ -939,6 +1076,12 @@ export function GoKartTrackCanvas({
       const resetTick = spectatorResetTickRef.current;
       const restartTick = restartRaceTickRef.current;
       const interactTick = vehicleInteractTickRef.current;
+
+      // Releasing the pause menu drops any held inputs so keys never stick
+      if (pauseTickRef.current !== prevPauseTick) {
+        prevPauseTick = pauseTickRef.current;
+        clearAllInputs();
+      }
 
       if (mode !== prevCameraMode) {
         prevCameraMode = mode;
@@ -1016,7 +1159,6 @@ export function GoKartTrackCanvas({
             charState = enterVehicle(charState, near.vehicle);
             charRig.group.visible = false;
             targetVeh.rig.driverGroup.visible = true;
-            targetVeh.rig.highlightRing.visible = false;
             soundEngine.playVehicleDoor(true);
             snapFollowNextFrame = true;
           }
@@ -1149,7 +1291,7 @@ export function GoKartTrackCanvas({
         const isBraking =
           mergedKartInput.brakeReverse ||
           Boolean(mergedKartInput.drift && Math.abs(activeVeh.state.speed) > 4);
-        activeVeh.rig.setBrakeLights(isBraking);
+        activeVeh.rig.setBrakeLights(isBraking, isBraking || lastNightFactor > 0.3);
 
         const groundY = getWorldGroundY(activeVeh.state.x, activeVeh.state.z);
         fxInput = {
@@ -1168,9 +1310,6 @@ export function GoKartTrackCanvas({
         };
 
         nearbyVehRef = null;
-        for (let i = 0; i < worldVehicles.length; i++) {
-          worldVehicles[i].rig.highlightRing.visible = false;
-        }
       } else {
         // Walking mode
         obstacleScratch.length = 0;
@@ -1230,14 +1369,25 @@ export function GoKartTrackCanvas({
           CHARACTER_PHYSICS.enterRange,
         );
         nearbyVehRef = near ? near.vehicle.ref : null;
+      }
 
-        const pulse = 1 + 0.05 * Math.sin(elapsedSimSeconds * 6.0);
-        for (let i = 0; i < worldVehicles.length; i++) {
-          const v = worldVehicles[i];
-          const isNear = nearbyVehRef === v;
-          v.rig.highlightRing.visible = isNear;
-          if (isNear) {
-            v.rig.highlightRing.scale.setScalar(pulse);
+      // Advance the daylight cycle & drive sky, sun, moon, fog and lamp glow
+      const daySample = applyDayNight(frameDt);
+      if (daySample.clockLabel !== lastClockLabel) {
+        lastClockLabel = daySample.clockLabel;
+        onDayNightChangeRef.current({
+          nightFactor: daySample.nightFactor,
+          duskGlow: daySample.duskGlow,
+          clockLabel: daySample.clockLabel,
+        });
+      }
+      const nightFactor = daySample.nightFactor;
+      if (Math.abs(nightFactor - lastNightFactor) > 0.12) {
+        lastNightFactor = nightFactor;
+        const headlightsOn = nightFactor > 0.42;
+        for (const v of worldVehicles) {
+          if (v.instanceId !== charState.activeVehicleId) {
+            v.rig.setBrakeLights(false, headlightsOn);
           }
         }
       }
@@ -1249,7 +1399,7 @@ export function GoKartTrackCanvas({
         raceState.status === 'racing',
         elapsedSimSeconds,
       );
-      marketBuild.update(elapsedSimSeconds);
+      marketBuild.update(elapsedSimSeconds, nightFactor);
 
       // Update procedural motorsport & world audio
       const cdCeil = Math.ceil(raceState.countdownSeconds);

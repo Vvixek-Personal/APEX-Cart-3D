@@ -363,11 +363,11 @@ export function buildStadiumArchitecture(textures: ProceduralTextureSet): Stadiu
   }
 
   // Subtle perimeter curb outlining the inner 240x240 grass field cleanly on concourse
-  // Leave a clean 14-unit opening at x = 0 on the South side (+Z) for the town-to-stadium road
+  // Leave a wide 30-unit opening at x = 0 on the South side (+Z) for the town-to-stadium road
   const curbWidth = 1.4;
   const curbLen = FIELD_HALF * 2 + curbWidth * 2;
   const curbGeoH = trackGeo(new THREE.BoxGeometry(curbLen, 0.38, curbWidth));
-  const curbGeoHSplit = trackGeo(new THREE.BoxGeometry(FIELD_HALF - 6.5, 0.38, curbWidth));
+  const curbGeoHSplit = trackGeo(new THREE.BoxGeometry(FIELD_HALF - 15, 0.38, curbWidth));
   const curbGeoV = trackGeo(new THREE.BoxGeometry(curbWidth, 0.38, FIELD_HALF * 2));
   const northCurb = new THREE.Mesh(curbGeoH, concreteLightMat);
   northCurb.position.set(0, concourseY + 0.19, -(FIELD_HALF + curbWidth * 0.5));
@@ -376,7 +376,7 @@ export function buildStadiumArchitecture(textures: ProceduralTextureSet): Stadiu
   for (const s of [-1, 1]) {
     const southCurbWing = new THREE.Mesh(curbGeoHSplit, concreteLightMat);
     southCurbWing.position.set(
-      s * (7 + (FIELD_HALF - 6.5) * 0.5),
+      s * (15 + (FIELD_HALF - 15) * 0.5),
       concourseY + 0.19,
       FIELD_HALF + curbWidth * 0.5,
     );

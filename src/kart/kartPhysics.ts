@@ -8,7 +8,7 @@ import {
 import {
   KART_TOWN_SPAWN,
   TOWN_COLLIDERS,
-  isPositionInMarketOrParkPath,
+  isPositionOnGrass,
   isPositionOnTownRoad,
 } from '../scene/townLayout';
 import type { VehiclePhysicsStats } from './vehicleCatalog';
@@ -46,23 +46,22 @@ export const KART_PHYSICS: VehiclePhysicsStats & {
   worldMinZ: number;
   worldMaxZ: number;
 } = {
-  maxForwardSpeed: 28,
-  maxReverseSpeed: 4,
-  offTrackMaxSpeed: 12.5,
-  plazaMaxSpeed: 22,
-  accelRate: 3.8,
+  maxForwardSpeed: 32,
+  maxReverseSpeed: 4.2,
+  offTrackMaxSpeed: 13,
+  accelRate: 3.4,
   reverseAccelRate: 2.2,
   brakeRate: 9,
   coastDrag: 0.7,
-  offTrackDrag: 26,
-  maxTurnRate: 2.38,
-  steerResponseRate: 6.5,
+  offTrackDrag: 22,
+  maxTurnRate: 1.5,
+  steerResponseRate: 3.4,
   kartRadius: 1.38,
-  wheelRadius: 0.42,
+  wheelRadius: 0.44,
   worldMinX: -174,
   worldMaxX: 174,
   worldMinZ: -196,
-  worldMaxZ: 416,
+  worldMaxZ: 424,
 };
 
 /**
@@ -296,7 +295,9 @@ export function stepKartPhysics(
   const onRaceTrack = trackDist <= TRACK_HALF;
   const onKerb = inStadiumBounds && trackDist >= TRACK_HALF - 1.35 && trackDist <= TRACK_HALF + 0.65;
   const onAsphalt = onRaceTrack || isPositionOnTownRoad(state.x, state.z);
-  const onPlazaPath = !onAsphalt && isPositionInMarketOrParkPath(state.x, state.z);
+  // Footpaths, plazas, concourse & the connector corridor are paved: no speed penalty.
+  // ONLY grass/turf limits speed, exactly like driving off-road.
+  const onGrass = !onAsphalt && isPositionOnGrass(state.x, state.z);
 
   // No free energy from releasing the handbrake. Legacy HUD fields remain zero.
   const boostTimer = 0;
@@ -304,12 +305,9 @@ export function stepKartPhysics(
   const throttle = (state.throttle ?? 0) + (throttleTarget - (state.throttle ?? 0)) *
     (1 - Math.exp(-(throttleTarget ? 3.2 : 9) * dt));
 
-  const baseTopSpeed = onAsphalt
+  const topSpeed = onAsphalt || !onGrass
     ? stats.maxForwardSpeed
-    : onPlazaPath
-      ? stats.plazaMaxSpeed
-      : stats.offTrackMaxSpeed;
-  const topSpeed = baseTopSpeed;
+    : stats.offTrackMaxSpeed;
 
   const prevSpeed = state.speed;
   let speed = prevSpeed;
@@ -323,7 +321,7 @@ export function stepKartPhysics(
       const speedRatio = Math.max(0, speed) / Math.max(1, topSpeed);
       const wheelForce = stats.accelRate * throttle * (1 - 0.78 * speedRatio * speedRatio);
       speed = Math.min(topSpeed, speed + wheelForce * dt);
-    } else if (!onAsphalt) {
+    } else if (onGrass) {
       speed = Math.max(topSpeed, speed - stats.offTrackDrag * dt);
     } else if (speed > topSpeed) {
       speed = Math.max(topSpeed, speed - stats.coastDrag * 0.8 * dt);
@@ -332,17 +330,15 @@ export function stepKartPhysics(
     if (speed > 0) {
       speed = Math.max(0, speed - stats.brakeRate * dt);
     } else {
-      const maxRev = onAsphalt || onPlazaPath
-        ? stats.maxReverseSpeed
-        : stats.maxReverseSpeed * 0.65;
+      const maxRev = onGrass ? stats.maxReverseSpeed * 0.65 : stats.maxReverseSpeed;
       speed = Math.max(-maxRev, speed - stats.reverseAccelRate * dt);
     }
   } else {
     const drag = input.accelerate && input.brakeReverse
       ? stats.brakeRate
-      : onAsphalt || onPlazaPath
-        ? stats.coastDrag + 0.0018 * speed * speed
-        : stats.offTrackDrag * 0.35;
+      : onGrass
+        ? stats.offTrackDrag * 0.35
+        : stats.coastDrag + 0.0018 * speed * speed;
     if (speed > 0) {
       speed = Math.max(0, speed - drag * dt);
     } else if (speed < 0) {
@@ -364,34 +360,34 @@ export function stepKartPhysics(
   if (isDrifting) {
     // Scrub forward speed while the rear tires slide.
     speed = Math.max(0, speed - 2.6 * Math.abs(steerAngle) * dt);
-    if (onAsphalt || onPlazaPath) {
+    if (!onGrass) {
       driftCharge = Math.min(1, driftCharge + dt * 0.95);
     }
   } else {
     driftCharge = Math.max(0, driftCharge - dt * 2.5);
   }
 
-  // Speed-responsive yaw authority (enhanced tail rotation when drifting)
+  // Speed-responsive yaw authority with gentle, weighty GTA-style steering response
   const absSpeed = Math.abs(speed);
   const speedSteerFactor =
     absSpeed < 0.25
       ? 0
-      : THREE.MathUtils.clamp(absSpeed / 7.5, 0.22, 1.0) *
-        (1.0 - 0.14 * THREE.MathUtils.clamp((absSpeed - 14) / 12, 0, 1));
+      : THREE.MathUtils.clamp(absSpeed / 9, 0.32, 1.0) *
+        (1.0 - 0.34 * THREE.MathUtils.clamp((absSpeed - 15) / 27, 0, 1));
   const reverseSign = speed >= 0 ? 1 : -1;
   const driftTurnBoost = isDrifting ? 1.28 : 1.0;
   const requestedYawRate = steerAngle * stats.maxTurnRate * driftTurnBoost * speedSteerFactor * reverseSign;
   // Tire grip limits cornering acceleration instead of allowing 5g turns at speed.
-  const gripLimit = onAsphalt ? 9.8 : onPlazaPath ? 6.8 : 4.2;
+  const gripLimit = onGrass ? 4.4 : 9.8;
   const maxYawRate = gripLimit / Math.max(3, absSpeed);
   const yawRate = THREE.MathUtils.clamp(requestedYawRate, -maxYawRate, maxYawRate);
   const yaw = state.yaw + yawRate * dt;
 
   // Lateral tire slip dynamics (local +X is left of +Z heading: sideVec = (cos(yaw), -sin(yaw)))
   let lateralSpeed = state.lateralSpeed ?? 0;
-  const slipInjection = isDrifting ? 0.34 : onAsphalt ? 0.065 : 0.15;
+  const slipInjection = isDrifting ? 0.34 : onGrass ? 0.14 : 0.045;
   lateralSpeed -= speed * yawRate * slipInjection * dt * 8.0;
-  const lateralGrip = isDrifting ? 3.2 : onAsphalt ? 13.5 : onPlazaPath ? 10.5 : 5.8;
+  const lateralGrip = isDrifting ? 3.2 : onGrass ? 6.5 : 16.5;
   lateralSpeed *= Math.exp(-lateralGrip * dt);
   lateralSpeed = THREE.MathUtils.clamp(lateralSpeed, -11.5, 11.5);
   if (Math.abs(lateralSpeed) < 0.01) lateralSpeed = 0;
@@ -461,19 +457,17 @@ export function stepKartPhysics(
   const latAccel = speed * yawRate;
   const kerbJitter = onKerb && absSpeed > 3 ? Math.sin(state.wheelSpin * 2.6) * 0.014 : 0;
   // Positive longAccel (accelerating) pitches nose slightly up (-rotX); braking dives nose (+rotX)
-  const targetPitch = THREE.MathUtils.clamp(-longAccel * 0.0022, -0.065, 0.075);
+  const targetPitch = THREE.MathUtils.clamp(-longAccel * 0.0016, -0.05, 0.06);
   // Left turn (yawRate > 0) rolls chassis outward to the right (+rotZ in local space)
-  const targetRoll = THREE.MathUtils.clamp(latAccel * 0.0026 + kerbJitter, -0.11, 0.11);
-  const suspAlpha = 1 - Math.exp(-11.0 * dt);
+  const targetRoll = THREE.MathUtils.clamp(latAccel * 0.0018 + kerbJitter, -0.075, 0.075);
+  const suspAlpha = 1 - Math.exp(-8.0 * dt);
   const pitchTilt = (state.pitchTilt ?? 0) + (targetPitch - (state.pitchTilt ?? 0)) * suspAlpha;
   const rollTilt = (state.rollTilt ?? 0) + (targetRoll - (state.rollTilt ?? 0)) * suspAlpha;
 
   const nextInStadium = Math.abs(nextX) <= FIELD_HALF && Math.abs(nextZ) <= FIELD_HALF;
   const nextTrackDist = nextInStadium ? distanceToTrackCenterline(nextX, nextZ, frames) : Infinity;
-  const nextOnTrack =
-    nextTrackDist <= TRACK_HALF ||
-    isPositionOnTownRoad(nextX, nextZ) ||
-    isPositionInMarketOrParkPath(nextX, nextZ);
+  // "onTrack" now means "on any paved surface": only grass counts as off-track grip loss
+  const nextOnTrack = !isPositionOnGrass(nextX, nextZ);
   const nextOnKerb =
     nextInStadium && nextTrackDist >= TRACK_HALF - 1.35 && nextTrackDist <= TRACK_HALF + 0.65;
 

@@ -23,6 +23,10 @@ const ENGINE_TONE_PRESETS: Record<
   sport: { baseHz: 56, maxHz: 215, subMult: 0.5, gears: 5, filterMaxHz: 1450 },
   rally: { baseHz: 62, maxHz: 245, subMult: 0.75, gears: 5, filterMaxHz: 1700 },
   cruiser: { baseHz: 46, maxHz: 165, subMult: 0.5, gears: 4, filterMaxHz: 1050 },
+  taxi: { baseHz: 52, maxHz: 190, subMult: 0.5, gears: 5, filterMaxHz: 1250 },
+  van: { baseHz: 42, maxHz: 150, subMult: 0.55, gears: 5, filterMaxHz: 950 },
+  pickup: { baseHz: 44, maxHz: 168, subMult: 0.7, gears: 5, filterMaxHz: 1050 },
+  bus: { baseHz: 34, maxHz: 120, subMult: 0.85, gears: 5, filterMaxHz: 800 },
 };
 
 /**

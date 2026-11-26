@@ -119,7 +119,7 @@ test('focused interactive UI elements (<button>, <input>) retain native Space/ke
   assert.equal(calls.toggledFollow, 0);
 });
 
-test('Space engages handbrake drift, KeyE queues interaction, and KeyM toggles mute when canvas has focus', () => {
+test('Space engages handbrake drift, KeyE queues interaction, and KeyM belongs to the map (not the tracker)', () => {
   const { tracker, calls } = createHarness();
 
   const spaceDown = makeKeyEvent('Space');
@@ -130,8 +130,10 @@ test('Space engages handbrake drift, KeyE queues interaction, and KeyM toggles m
   tracker.handleKeyDown(makeKeyEvent('KeyE'));
   assert.equal(tracker.interactQueued, true);
 
-  tracker.handleKeyDown(makeKeyEvent('KeyM'));
-  assert.equal(calls.toggledMute, 1);
+  // KeyM is the rebindable full-map key handled by the app shell, never mute
+  const keyMEv = makeKeyEvent('KeyM');
+  tracker.handleKeyDown(keyMEv);
+  assert.equal(calls.toggledMute, 0);
 
   tracker.clear();
   assert.equal(tracker.kartInput.drift, false);
