@@ -18,7 +18,7 @@ import type { KartInputState } from './kart/kartPhysics';
 import { GoKartTrackCanvas } from './scene/GoKartTrackCanvas';
 
 export default function App() {
-  const [cameraMode, setCameraMode] = useState<CameraMode>('spectator');
+  const [cameraMode, setCameraMode] = useState<CameraMode>('follow');
   const [spectatorResetTick, setSpectatorResetTick] = useState(0);
   const [restartRaceTick, setRestartRaceTick] = useState(0);
   const [raceState, setRaceState] = useState<RaceState>(() =>

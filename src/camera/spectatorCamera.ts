@@ -204,16 +204,17 @@ export class SpectatorCameraController {
       )
       .normalize();
 
-    // Subtle kart composition pull (never chases kart — anchors view near circuit center)
+    // Subtle kart composition pull (shifts gently south when kart is in town so both town & stadium stay framed)
     const biasX = THREE.MathUtils.clamp(
       kartX * resp.kartBiasWeight,
       -resp.kartBiasMaxOffset,
       resp.kartBiasMaxOffset,
     );
+    const townCenterPull = kartZ > 156 ? 115 : 0;
     const biasZ = THREE.MathUtils.clamp(
-      kartZ * resp.kartBiasWeight,
+      townCenterPull + kartZ * resp.kartBiasWeight,
       -resp.kartBiasMaxOffset,
-      resp.kartBiasMaxOffset,
+      145,
     );
     this.targetScratch.set(biasX, this.config.spectatorTargetHeight, biasZ);
 
@@ -247,8 +248,7 @@ export class SpectatorCameraController {
     this.anchors[13].set(162, 15, 0);
     this.anchors[14].set(-156, 14, 0);
 
-    // 15..20: Scoreboard + Corner floodlight towers (on widescreen include full tower tops;
-    // on compact portrait include tower bases + lower skyline to prioritize track & kart size)
+    // 15..20: Scoreboard + Corner floodlight towers
     const towerY = resp.prioritizeTrackAndKart ? 18 : STADIUM_TOWER_HEIGHT;
     const towerXZ = resp.prioritizeTrackAndKart ? FIELD_HALF + 14 : STADIUM_TOWER_OFFSET;
     this.anchors[15].set(-124, 24, -142);
@@ -258,12 +258,13 @@ export class SpectatorCameraController {
     this.anchors[19].set(towerXZ, towerY, towerXZ);
     this.anchors[20].set(0, 8, 150);
 
-    // 21..24: Stadium concourse apron corners (174) so desktop frames the stadium architecture prominently
+    // 21..24: Extend south anchors to include the Town District when kart is in town
     const outerExt = resp.prioritizeTrackAndKart ? sH : this.bounds.stadiumHalfExtent;
+    const southExt = kartZ > 156 ? 410 : outerExt;
     this.anchors[21].set(-outerExt, 0, -outerExt);
     this.anchors[22].set(outerExt, 0, -outerExt);
-    this.anchors[23].set(-outerExt, 0, outerExt);
-    this.anchors[24].set(outerExt, 0, outerExt);
+    this.anchors[23].set(-outerExt, 0, southExt);
+    this.anchors[24].set(outerExt, 0, southExt);
 
     const maxAllowedNdc = 1 - resp.padding;
     const fov = resp.fov;
@@ -391,9 +392,9 @@ export class SpectatorCameraController {
       };
     }
 
-    // Blend slightly faster when transitioning back from follow mode so switching feels responsive
+    // Blend quickly when transitioning back from follow mode so switching feels crisp
     const rate = isReturningFromFollow
-      ? Math.max(this.config.spectatorDamping * 2.2, 8.5)
+      ? Math.max(this.config.spectatorDamping * 3.8, 14)
       : this.config.spectatorDamping;
     const posAlpha = 1 - Math.exp(-rate * dt);
     const rotAlpha = 1 - Math.exp(-(rate * 1.15) * dt);

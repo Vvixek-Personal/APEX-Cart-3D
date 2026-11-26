@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { STADIUM_GATE_TRIGGER_Z } from '../scene/townLayout';
 import { TrackFrame, TRACK_HALF } from '../track/trackLayout';
 
 export interface CheckpointDef {
@@ -22,7 +23,7 @@ export interface RaceState {
 }
 
 export function createInitialRaceState(maxLaps = 3, totalCheckpoints = 6): RaceState {
-  const state: RaceState = {
+  return {
     status: 'waiting',
     countdownSeconds: 3.5,
     lap: 1,
@@ -35,19 +36,25 @@ export function createInitialRaceState(maxLaps = 3, totalCheckpoints = 6): RaceS
     finalTime: null,
     isFinished: false,
   };
-  return state;
 }
 
 /**
- * Generates N evenly-spaced checkpoints along the track curve/frames.
+ * Generates N checkpoints ordered along the circuit starting just after the
+ * South Stadium Gate entry (u ~ 0.16) through just before the FINISH line (u ~ 0.93)
+ * so both South-Gate arrivals and grid starts pass all checkpoints sequentially before FINISH.
  */
 export function generateCheckpoints(frames: ReadonlyArray<TrackFrame>, count = 6): CheckpointDef[] {
   const checkpoints: CheckpointDef[] = [];
   const n = frames.length;
   if (n === 0) return checkpoints;
 
+  const startOffsetU = 0.16;
+  const spanU = 0.77; // Covers u from 0.16 to 0.93 before FINISH (~0.06)
+
   for (let i = 0; i < count; i++) {
-    const frameIndex = Math.floor((i * n) / count);
+    const frac = count > 1 ? i / (count - 1) : 0;
+    const u = (startOffsetU + frac * spanU) % 1;
+    const frameIndex = Math.floor(u * n) % n;
     const frame = frames[frameIndex];
     checkpoints.push({
       index: i,
@@ -65,7 +72,7 @@ export function updateRaceState(
   state: RaceState,
   kartX: number,
   kartZ: number,
-  kartSpeed: number,
+  _kartSpeed: number,
   kartYaw: number,
   dt: number,
   checkpoints: ReadonlyArray<CheckpointDef>,
@@ -76,18 +83,19 @@ export function updateRaceState(
     return state;
   }
 
-  // 0. Handle waiting phase (player is in market district until crossing stadium entrance gate at z < 212)
+  // 0. Waiting phase: player explores the town district freely until driving into the stadium bowl
   if (state.status === 'waiting') {
-    if (kartZ < 212) {
+    if (kartZ < STADIUM_GATE_TRIGGER_Z && Math.abs(kartX) <= 125) {
       return {
         ...state,
         status: 'countdown',
+        countdownSeconds: 3.5,
       };
     }
     return state;
   }
 
-  // 1. Handle countdown phase
+  // 1. Countdown phase inside stadium
   if (state.status === 'countdown') {
     const nextCountdown = state.countdownSeconds - dt;
     if (nextCountdown <= 0) {
@@ -113,19 +121,18 @@ export function updateRaceState(
   let nextBestLap = state.bestLapTime;
   let nextFinalTime = state.finalTime;
   let nextIsFinished: boolean = state.isFinished;
-  let nextStatus: 'waiting' | 'countdown' | 'racing' | 'finished' = state.status;
+  let nextStatus: RaceState['status'] = state.status;
 
   const kartPos = new THREE.Vector3(kartX, 0, kartZ);
   const forwardHeading = new THREE.Vector3(Math.sin(kartYaw), 0, Math.cos(kartYaw));
 
-  // Checkpoint collision / progression
+  // Checkpoint progression
   if (checkpoints.length > 0 && nextCpIndex < checkpoints.length) {
     const cp = checkpoints[nextCpIndex];
     const distToCp = kartPos.distanceTo(cp.position);
-    const triggerRadius = TRACK_HALF * 1.8; // Generous trigger radius for high speed
+    const triggerRadius = TRACK_HALF * 1.8;
 
     if (distToCp <= triggerRadius) {
-      // Verify kart is moving forward relative to track tangent at checkpoint
       const alignment = forwardHeading.dot(cp.tangent);
       if (alignment > -0.3) {
         nextCpIndex++;
@@ -133,7 +140,7 @@ export function updateRaceState(
     }
   }
 
-  // Lap completion check: once all checkpoints are passed, crossing finish line completes lap
+  // Lap completion check once all checkpoints are passed
   if (nextCpIndex >= checkpoints.length) {
     const distToFinish = kartPos.distanceTo(finishLinePosition);
     const finishTriggerRadius = TRACK_HALF * 1.6;
@@ -141,7 +148,6 @@ export function updateRaceState(
     if (distToFinish <= finishTriggerRadius) {
       const alignmentToFinish = forwardHeading.dot(finishLineTangent);
       if (alignmentToFinish > 0.0) {
-        // Lap completed!
         const completedLapTime = nextLapTime;
         if (nextBestLap === null || completedLapTime < nextBestLap) {
           nextBestLap = completedLapTime;
@@ -153,7 +159,7 @@ export function updateRaceState(
           nextFinalTime = nextElapsed;
         } else {
           nextLap++;
-          nextCpIndex = 0; // Reset checkpoints for next lap
+          nextCpIndex = 0;
         }
       }
     }

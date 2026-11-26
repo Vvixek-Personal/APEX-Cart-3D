@@ -29,6 +29,8 @@ import {
 import type { CameraMode } from '../components/TouchControls';
 import { buildTrackBanners } from './buildBanners';
 import { buildStadiumArchitecture } from './buildStadium';
+import { buildMarketDistrict } from './buildMarketDistrict';
+import { getWorldGroundY } from './townLayout';
 import { buildTrackEnvironment } from './buildTrackMesh';
 import { createProceduralTextures } from './textures';
 
@@ -201,7 +203,7 @@ export function GoKartTrackCanvas({
     renderer.toneMappingExposure = 0.96;
     renderer.setPixelRatio(isSoftwareGl ? 1 : Math.min(window.devicePixelRatio, 2));
     renderer.setSize(width, height);
-    renderer.shadowMap.enabled = true;
+    renderer.shadowMap.enabled = !isSoftwareGl;
     renderer.shadowMap.type = THREE.PCFShadowMap;
     renderer.domElement.style.display = 'block';
     renderer.domElement.style.width = '100%';
@@ -226,25 +228,26 @@ export function GoKartTrackCanvas({
     const textures = createProceduralTextures(maxAnisotropy);
     scene.background = textures.skyBackdrop;
 
-    // Bright, soft daylight lighting rig scaled to cover the 240x240 field and surrounding stadium
+    // Bright, soft daylight lighting rig covering both stadium and town district
     const hemiLight = new THREE.HemisphereLight(0xd9efff, 0x3b8f2e, 0.65);
     hemiLight.position.set(0, 180, 0);
     scene.add(hemiLight);
 
     const sunLight = new THREE.DirectionalLight(0xfff5e0, 1.45);
-    sunLight.position.set(-165, 280, 195);
-    sunLight.castShadow = true;
-    const shadowSize = isSoftwareGl ? 1024 : 2048;
-    sunLight.shadow.mapSize.set(shadowSize, shadowSize);
+    sunLight.position.set(-165, 340, 295);
+    sunLight.target.position.set(0, 0, 110);
+    scene.add(sunLight.target);
+    sunLight.castShadow = !isSoftwareGl;
+    sunLight.shadow.mapSize.set(1024, 1024);
     sunLight.shadow.camera.near = 25;
-    sunLight.shadow.camera.far = 850;
-    sunLight.shadow.camera.left = -255;
-    sunLight.shadow.camera.right = 255;
-    sunLight.shadow.camera.top = 255;
-    sunLight.shadow.camera.bottom = -255;
+    sunLight.shadow.camera.far = 1100;
+    sunLight.shadow.camera.left = -280;
+    sunLight.shadow.camera.right = 280;
+    sunLight.shadow.camera.top = 340;
+    sunLight.shadow.camera.bottom = -340;
     sunLight.shadow.bias = -0.0008;
     sunLight.shadow.normalBias = 0.18;
-    sunLight.shadow.radius = 3.0;
+    sunLight.shadow.radius = 2.5;
     scene.add(sunLight);
 
     const fillLight = new THREE.DirectionalLight(0xdceeff, 0.25);
@@ -281,17 +284,21 @@ export function GoKartTrackCanvas({
     const stadiumBuild = buildStadiumArchitecture(textures);
     scene.add(stadiumBuild.group);
 
+    const marketBuild = buildMarketDistrict(textures);
+    scene.add(marketBuild.group);
+
     const bannerBuild = buildTrackBanners(bannerPlacements, textures);
     scene.add(bannerBuild.group);
 
-    // Lightweight 3D player go-kart placed on the starting grid facing the track
+    // Lightweight 3D player go-kart placed on the Town Main Avenue road facing North
     const kartRig = buildKartMesh(textures.contactShadow);
     let kartState = createInitialKartState(curve);
-    kartRig.group.position.set(kartState.x, 0.04, kartState.z);
+    const initialKartY = getWorldGroundY(kartState.x, kartState.z) + 0.04;
+    kartRig.group.position.set(kartState.x, initialKartY, kartState.z);
     kartRig.group.rotation.y = kartState.yaw;
     scene.add(kartRig.group);
 
-    // Race state management
+    // Race state management (starts in 'waiting' town free-roam until entering stadium)
     let raceState = createInitialRaceState(3, 6);
 
     // Cinematic elevated three-quarter city skyline spectator camera & upright free-camera
@@ -314,19 +321,43 @@ export function GoKartTrackCanvas({
       kartState.z,
       controls.target,
     );
+
+    if (cameraModeRef.current === 'follow') {
+      _kartPos.set(kartState.x, initialKartY, kartState.z);
+      _forwardVec.set(Math.sin(kartState.yaw), 0, Math.cos(kartState.yaw));
+      camera.position
+        .copy(_kartPos)
+        .addScaledVector(_forwardVec, -11.5)
+        .setY(initialKartY + 4.9);
+      controls.target
+        .copy(_kartPos)
+        .addScaledVector(_forwardVec, 5.0)
+        .setY(initialKartY + 1.2);
+      camera.fov = 46;
+      camera.near = 0.5;
+      camera.updateProjectionMatrix();
+      camera.lookAt(controls.target);
+    }
+
     freeCamCtrl.syncFromCamera(camera);
 
     let specElevDeg = initialPose.elevationDeg;
     let specAzimDeg = initialPose.azimuthDeg;
     let specDist = initialPose.distance;
-    horizonFog.near = Math.max(540, initialPose.distance * 1.12);
-    horizonFog.far = Math.max(1250, initialPose.distance * 2.02);
+    horizonFog.near = cameraModeRef.current === 'follow' ? 620 : Math.max(540, initialPose.distance * 1.12);
+    horizonFog.far = cameraModeRef.current === 'follow' ? 2100 : Math.max(1250, initialPose.distance * 2.02);
 
     let userMovedOrbit = false;
     let returningToSpectator = false;
     let prevCameraMode: CameraMode = cameraModeRef.current;
     let prevResetTick = spectatorResetTickRef.current;
     let prevRestartTick = restartRaceTickRef.current;
+    let lastHudSyncAt = 0;
+    let lastHudStatus = raceState.status;
+    let lastHudLap = raceState.lap;
+    let lastHudCp = raceState.currentCheckpointIndex;
+    let lastHudFinished = raceState.isFinished;
+    let lastHudCountdownCeil = Math.ceil(raceState.countdownSeconds);
 
     // Keyboard input states (kart + free camera)
     const keyInput: KartInputState = {
@@ -756,8 +787,10 @@ export function GoKartTrackCanvas({
         prevRestartTick = restartTick;
         raceState = createInitialRaceState(3, 6);
         kartState = createInitialKartState(curve);
-        kartRig.group.position.set(kartState.x, 0.04, kartState.z);
+        const resetY = getWorldGroundY(kartState.x, kartState.z) + 0.04;
+        kartRig.group.position.set(kartState.x, resetY, kartState.z);
         kartRig.group.rotation.y = kartState.yaw;
+        onRaceStateChangeRef.current(raceState);
       }
 
       // Update race state machine
@@ -772,10 +805,31 @@ export function GoKartTrackCanvas({
         finishPos,
         finishTangent,
       );
-      onRaceStateChangeRef.current(raceState);
 
-      // Kart physics (only takes player driving inputs when racing and not in Free-Cam)
-      const drivingActive = raceState.status === 'racing' && !raceState.isFinished && mode !== 'free';
+      // Throttle React HUD state updates (immediate on phase/lap/checkpoint changes, <=10Hz for timers)
+      const nowMs = performance.now();
+      const cdCeil = Math.ceil(raceState.countdownSeconds);
+      const discreteChanged =
+        raceState.status !== lastHudStatus ||
+        raceState.lap !== lastHudLap ||
+        raceState.currentCheckpointIndex !== lastHudCp ||
+        raceState.isFinished !== lastHudFinished ||
+        (raceState.status === 'countdown' && cdCeil !== lastHudCountdownCeil);
+      if (discreteChanged || (raceState.status === 'racing' && nowMs - lastHudSyncAt >= 100)) {
+        lastHudStatus = raceState.status;
+        lastHudLap = raceState.lap;
+        lastHudCp = raceState.currentCheckpointIndex;
+        lastHudFinished = raceState.isFinished;
+        lastHudCountdownCeil = cdCeil;
+        lastHudSyncAt = nowMs;
+        onRaceStateChangeRef.current(raceState);
+      }
+
+      // Kart physics: active during Town Free Roam ('waiting') AND active race ('racing')
+      const drivingActive =
+        (raceState.status === 'waiting' || raceState.status === 'racing') &&
+        !raceState.isFinished &&
+        mode !== 'free';
       if (!drivingActive) {
         mergedKartInput.accelerate = false;
         mergedKartInput.brakeReverse = false;
@@ -792,7 +846,9 @@ export function GoKartTrackCanvas({
       kartState = stepKartPhysics(kartState, mergedKartInput, dt, frames);
 
       // Update 3D kart transform & wheel animations (world itself never moves/rotates/scales)
-      kartRig.group.position.set(kartState.x, 0.04, kartState.z);
+      const kartGroundY = getWorldGroundY(kartState.x, kartState.z);
+      const kartY = kartGroundY + 0.04;
+      kartRig.group.position.set(kartState.x, kartY, kartState.z);
       kartRig.group.rotation.y = kartState.yaw;
 
       const visualSteer = kartState.steerAngle * 0.42;
@@ -830,17 +886,17 @@ export function GoKartTrackCanvas({
         );
       } else if (mode === 'follow') {
         controls.enabled = false;
-        _kartPos.set(kartState.x, 0.04, kartState.z);
+        _kartPos.set(kartState.x, kartY, kartState.z);
         _forwardVec.set(Math.sin(kartState.yaw), 0, Math.cos(kartState.yaw));
 
         _desiredCamPos
           .copy(_kartPos)
-          .addScaledVector(_forwardVec, -9.8)
-          .setY(4.4);
+          .addScaledVector(_forwardVec, -11.5)
+          .setY(kartY + 4.9);
         _desiredCamTarget
           .copy(_kartPos)
-          .addScaledVector(_forwardVec, 3.0)
-          .setY(0.95);
+          .addScaledVector(_forwardVec, 5.0)
+          .setY(kartY + 1.2);
 
         const posAlpha = 1 - Math.exp(-9.5 * dt);
         const lookAlpha = 1 - Math.exp(-12.0 * dt);
@@ -952,6 +1008,7 @@ export function GoKartTrackCanvas({
       disposeAtmosphere();
       kartRig.dispose();
       stadiumBuild.dispose();
+      marketBuild.dispose();
       trackBuild.dispose();
       bannerBuild.dispose();
       horizonGroundGeo.dispose();

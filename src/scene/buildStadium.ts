@@ -364,18 +364,28 @@ export function buildStadiumArchitecture(textures: ProceduralTextureSet): Stadiu
   }
 
   // Subtle perimeter curb outlining the inner 240x240 grass field cleanly on concourse
+  // Leave a clean 14-unit opening at x = 0 on the South side (+Z) for the town-to-stadium road
   const curbWidth = 1.4;
   const curbLen = FIELD_HALF * 2 + curbWidth * 2;
   const curbGeoH = trackGeo(new THREE.BoxGeometry(curbLen, 0.38, curbWidth));
+  const curbGeoHSplit = trackGeo(new THREE.BoxGeometry(FIELD_HALF - 6.5, 0.38, curbWidth));
   const curbGeoV = trackGeo(new THREE.BoxGeometry(curbWidth, 0.38, FIELD_HALF * 2));
+  const northCurb = new THREE.Mesh(curbGeoH, concreteLightMat);
+  northCurb.position.set(0, concourseY + 0.19, -(FIELD_HALF + curbWidth * 0.5));
+  northCurb.receiveShadow = true;
+  group.add(northCurb);
   for (const s of [-1, 1]) {
-    const ch = new THREE.Mesh(curbGeoH, concreteLightMat);
-    ch.position.set(0, concourseY + 0.19, s * (FIELD_HALF + curbWidth * 0.5));
-    ch.receiveShadow = true;
+    const southCurbWing = new THREE.Mesh(curbGeoHSplit, concreteLightMat);
+    southCurbWing.position.set(
+      s * (7 + (FIELD_HALF - 6.5) * 0.5),
+      concourseY + 0.19,
+      FIELD_HALF + curbWidth * 0.5,
+    );
+    southCurbWing.receiveShadow = true;
     const cv = new THREE.Mesh(curbGeoV, concreteLightMat);
     cv.position.set(s * (FIELD_HALF + curbWidth * 0.5), concourseY + 0.19, 0);
     cv.receiveShadow = true;
-    group.add(ch, cv);
+    group.add(southCurbWing, cv);
   }
 
   // =========================================================================
@@ -769,63 +779,72 @@ export function buildStadiumArchitecture(textures: ProceduralTextureSet): Stadiu
   westGroup.add(westGateTop, westGateVoid);
 
   // -------------------------------------------------------------------------
-  // C. SMALLER LOW-PROFILE SOUTH STAND (+Z side, facing -Z, clears spectator view)
+  // C. SPLIT LOW-PROFILE SOUTH STAND (+Z side) WITH WIDE DRIVEABLE ENTRANCE GATE
   // -------------------------------------------------------------------------
   const southGroup = new THREE.Group();
   southGroup.name = 'SOUTH_STAND';
   group.add(southGroup);
 
-  const southWidth = 172;
+  const southWingWidth = 74;
+  const southWingCenterAbs = 52; // Spans |x| from 15 to 89, leaving [-15, +15] fully open!
   const southYaw = Math.PI;
-  buildSteppedTier(
-    southGroup,
-    0,
-    0,
-    southYaw,
-    southWidth,
-    5,
-    2.4,
-    6,
-    2.1,
-    0.66,
-    -132.5,
-    concourseY + 0.65,
-    minorSectionColors,
-  );
+  const southRearWallGeo = trackGeo(new THREE.BoxGeometry(southWingWidth + 2, 6.2, 1.4));
+  const southRearTrimGeo = trackGeo(new THREE.BoxGeometry(southWingWidth + 2.4, 0.6, 1.8));
+  const southRearStripeGeo = trackGeo(new THREE.BoxGeometry(southWingWidth + 2.5, 0.28, 1.86));
 
-  // South rear concourse facade & entrance gate portal (kept low so full track & field show cleanly)
-  const southRearWallGeo = trackGeo(new THREE.BoxGeometry(southWidth + 2, 6.2, 1.4));
-  const southRearWall = new THREE.Mesh(southRearWallGeo, facadeWhiteMat);
-  southRearWall.position.set(0, concourseY + 3.1, 149.5);
-  southRearWall.castShadow = true;
-  southRearWall.receiveShadow = true;
-  southGroup.add(southRearWall);
+  for (const side of [-1, 1]) {
+    const cx = side * southWingCenterAbs;
+    buildSteppedTier(
+      southGroup,
+      cx,
+      0,
+      southYaw,
+      southWingWidth,
+      2,
+      2.2,
+      6,
+      2.1,
+      0.66,
+      -132.5,
+      concourseY + 0.65,
+      minorSectionColors,
+    );
 
-  const southRearTrim = new THREE.Mesh(
-    trackGeo(new THREE.BoxGeometry(southWidth + 2.4, 0.6, 1.8)),
+    const wingWall = new THREE.Mesh(southRearWallGeo, facadeWhiteMat);
+    wingWall.position.set(cx, concourseY + 3.1, 149.5);
+    wingWall.castShadow = true;
+    wingWall.receiveShadow = true;
+
+    const wingTrim = new THREE.Mesh(southRearTrimGeo, darkSteelMat);
+    wingTrim.position.set(cx, concourseY + 6.4, 149.5);
+
+    const wingStripe = new THREE.Mesh(southRearStripeGeo, accentRedMat);
+    wingStripe.position.set(cx, concourseY + 6.0, 149.5);
+
+    southGroup.add(wingWall, wingTrim, wingStripe);
+  }
+
+  // Open Driveable South Stadium Entrance Archway (x in [-14, +14] completely clear!)
+  const southGatePierGeo = trackGeo(new THREE.BoxGeometry(2.8, 9.6, 4.4));
+  for (const side of [-1, 1]) {
+    const pier = new THREE.Mesh(southGatePierGeo, facadeWhiteMat);
+    pier.position.set(side * 14.2, concourseY + 4.8, 150.2);
+    pier.castShadow = true;
+    pier.receiveShadow = true;
+    southGroup.add(pier);
+  }
+  const southGateTop = new THREE.Mesh(
+    trackGeo(new THREE.BoxGeometry(31.6, 2.2, 4.6)),
     darkSteelMat,
   );
-  southRearTrim.position.set(0, concourseY + 6.4, 149.5);
-  const southRearStripe = new THREE.Mesh(
-    trackGeo(new THREE.BoxGeometry(southWidth + 2.5, 0.28, 1.86)),
+  southGateTop.position.set(0, 9.8, 150.2);
+  southGateTop.castShadow = true;
+  const southGateAccent = new THREE.Mesh(
+    trackGeo(new THREE.BoxGeometry(31.8, 0.55, 4.75)),
     accentRedMat,
   );
-  southRearStripe.position.set(0, concourseY + 6.0, 149.5);
-  southGroup.add(southRearTrim, southRearStripe);
-
-  // South Gate Portal
-  const southGateTop = new THREE.Mesh(
-    trackGeo(new THREE.BoxGeometry(24, 1.8, 4.2)),
-    darkSteelMat,
-  );
-  southGateTop.position.set(0, 6.6, 151.4);
-  southGateTop.castShadow = true;
-  const southGateVoid = new THREE.Mesh(
-    trackGeo(new THREE.BoxGeometry(17, 5.6, 2.0)),
-    darkPortalMat,
-  );
-  southGateVoid.position.set(0, 2.8, 150.2);
-  southGroup.add(southGateTop, southGateVoid);
+  southGateAccent.position.set(0, 8.95, 150.2);
+  southGroup.add(southGateTop, southGateAccent);
 
   // -------------------------------------------------------------------------
   // D. DISTINCT ARCHITECTURAL EAST PAVILION (+X side overlooking START/FINISH straight)
@@ -1139,8 +1158,8 @@ export function buildStadiumArchitecture(textures: ProceduralTextureSet): Stadiu
   const bedCoords: Array<[number, number, number, number]> = [
     [-22, -193, 18, 26],
     [22, -193, 18, 26],
-    [-22, 193, 18, 26],
-    [22, 193, 18, 26],
+    [-28, 193, 16, 26],
+    [28, 193, 16, 26],
     [-193, -22, 26, 18],
     [-193, 22, 26, 18],
     [193, -22, 26, 18],

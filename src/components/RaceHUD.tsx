@@ -34,53 +34,68 @@ export function RaceHUD({ raceState, onRestart }: RaceHUDProps) {
 
   return (
     <>
-      {/* Countdown overlay */}
+      {/* Countdown overlay (only triggers after entering Stadium Gate) */}
       {raceState.status === 'countdown' && (
         <div className="pointer-events-none fixed inset-0 z-30 flex items-center justify-center">
-          <div className="flex flex-col items-center animate-pulse">
-            <span className="text-7xl sm:text-9xl font-black tracking-tighter text-white drop-shadow-[0_8px_24px_rgba(0,0,0,0.8)]">
+          <div className="flex flex-col items-center">
+            <span className="text-7xl sm:text-9xl font-black tracking-tighter text-white drop-shadow-[0_8px_24px_rgba(0,0,0,0.85)]">
               {countdownText}
             </span>
-            <span className="mt-2 text-lg sm:text-2xl font-bold uppercase tracking-widest text-sky-200 drop-shadow-[0_4px_12px_rgba(0,0,0,0.6)]">
-              {countdownVal > 0 ? 'Prepare for Apex Grand Prix' : 'Race Started!'}
+            <span className="mt-2 text-lg sm:text-2xl font-bold uppercase tracking-widest text-sky-200 drop-shadow-[0_4px_12px_rgba(0,0,0,0.7)]">
+              {countdownVal > 0 ? 'Stadium Race Starting' : 'Go!'}
             </span>
           </div>
         </div>
       )}
 
-      {/* Compact Top-Left Race HUD Card */}
-      <div className="pointer-events-none fixed top-4 left-4 z-20 flex flex-col gap-1.5 rounded-2xl border border-white/20 bg-[#161c24]/85 p-3.5 text-white shadow-xl backdrop-blur-md sm:min-w-[220px]">
+      {/* Compact Top-Left HUD Card (rgba fill, zero backdrop-blur for fast WebGL compositing) */}
+      <div
+        data-testid="race-hud"
+        className="pointer-events-none fixed top-4 left-4 z-20 flex flex-col gap-1.5 rounded-2xl border border-white/20 bg-[rgba(22,28,36,0.88)] p-3.5 text-white shadow-xl sm:min-w-[230px]"
+      >
         <div className="flex items-center justify-between gap-4 border-b border-white/10 pb-2">
           <span className="text-xs font-bold uppercase tracking-wider text-sky-400">
-            Apex Grand Prix
+            {raceState.status === 'waiting' ? 'Town District' : 'Apex Grand Prix'}
           </span>
-          <span className="rounded bg-sky-500/20 px-2 py-0.5 text-xs font-extrabold tracking-wide text-sky-200">
-            Lap {Math.min(raceState.lap, raceState.maxLaps)}/{raceState.maxLaps}
-          </span>
+          {raceState.status === 'waiting' ? (
+            <span className="rounded bg-emerald-500/25 px-2 py-0.5 text-xs font-extrabold tracking-wide text-emerald-300">
+              Free Roam
+            </span>
+          ) : (
+            <span className="rounded bg-sky-500/20 px-2 py-0.5 text-xs font-extrabold tracking-wide text-sky-200">
+              Lap {Math.min(raceState.lap, raceState.maxLaps)}/{raceState.maxLaps}
+            </span>
+          )}
         </div>
 
-        <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs pt-1">
-          <span className="text-white/70">Checkpoint:</span>
-          <span className="font-bold text-right text-emerald-300">
-            {raceState.currentCheckpointIndex}/{raceState.totalCheckpoints}
-          </span>
+        {raceState.status === 'waiting' ? (
+          <div className="pt-1 text-xs leading-snug text-white/85">
+            Explore town streets, market &amp; park. Drive north through the Stadium Gate to race!
+          </div>
+        ) : (
+          <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs pt-1 tabular-nums">
+            <span className="text-white/70">Checkpoint:</span>
+            <span className="font-bold text-right text-emerald-300">
+              {raceState.currentCheckpointIndex}/{raceState.totalCheckpoints}
+            </span>
 
-          <span className="text-white/70">Time:</span>
-          <span className="font-mono font-bold text-right text-white">
-            {formatTime(raceState.elapsedTime)}
-          </span>
+            <span className="text-white/70">Time:</span>
+            <span className="font-mono font-bold text-right text-white">
+              {formatTime(raceState.elapsedTime)}
+            </span>
 
-          <span className="text-white/70">Best Lap:</span>
-          <span className="font-mono font-bold text-right text-amber-300">
-            {raceState.bestLapTime !== null ? formatTime(raceState.bestLapTime) : '--:--.--'}
-          </span>
-        </div>
+            <span className="text-white/70">Best Lap:</span>
+            <span className="font-mono font-bold text-right text-amber-300">
+              {raceState.bestLapTime !== null ? formatTime(raceState.bestLapTime) : '--:--.--'}
+            </span>
+          </div>
+        )}
       </div>
 
       {/* Race Finished Modal */}
       {raceState.isFinished && (
-        <div className="pointer-events-auto fixed inset-0 z-40 flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm">
-          <div className="flex w-full max-w-md flex-col items-center rounded-3xl border border-white/25 bg-[#161c24]/95 p-6 sm:p-8 text-center text-white shadow-2xl">
+        <div className="pointer-events-auto fixed inset-0 z-40 flex items-center justify-center bg-[rgba(8,12,18,0.78)] p-4">
+          <div className="flex w-full max-w-md flex-col items-center rounded-3xl border border-white/25 bg-[rgba(22,28,36,0.96)] p-6 sm:p-8 text-center text-white shadow-2xl">
             <span className="text-xs font-bold uppercase tracking-widest text-amber-400">
               Grand Prix Completed
             </span>
@@ -88,7 +103,7 @@ export function RaceHUD({ raceState, onRestart }: RaceHUDProps) {
               Race Finished!
             </h2>
 
-            <div className="my-6 w-full rounded-2xl border border-white/10 bg-white/5 p-4">
+            <div className="my-6 w-full rounded-2xl border border-white/10 bg-white/5 p-4 tabular-nums">
               <div className="flex justify-between py-1.5 border-b border-white/10 text-sm">
                 <span className="text-white/70">Total Race Time</span>
                 <span className="font-mono font-bold text-sky-300">
@@ -108,9 +123,9 @@ export function RaceHUD({ raceState, onRestart }: RaceHUDProps) {
               onClick={onRestart}
               onPointerDown={stopPointer}
               aria-label="Restart race"
-              className="w-full rounded-2xl bg-gradient-to-r from-emerald-600 to-emerald-500 py-3.5 text-base font-extrabold text-white shadow-lg shadow-emerald-900/40 hover:from-emerald-500 hover:to-emerald-400 active:scale-95 transition-transform duration-75"
+              className="w-full rounded-2xl bg-emerald-600 py-3.5 text-base font-extrabold text-white shadow-lg hover:bg-emerald-500 active:scale-95 transition-transform duration-75"
             >
-              Restart Race
+              Return to Town
             </button>
           </div>
         </div>

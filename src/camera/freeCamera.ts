@@ -62,8 +62,8 @@ export function getFreeCameraMinHeight(x: number, z: number): number {
   if (ax <= 180 && az <= 180) {
     return 1.2; // Stadium concourse apron (y = -0.35)
   }
-  if (ax <= 214 && az <= 214) {
-    return 0.8; // Outer landscaped park lawn (y = -0.85)
+  if (ax <= 214 && (az <= 214 || (z > 212 && z <= 430))) {
+    return 0.8; // Outer landscaped park lawn & town district (y = -0.85..-0.64)
   }
   return -2.0; // Surrounding horizon ground plane (y = -4.02)
 }
