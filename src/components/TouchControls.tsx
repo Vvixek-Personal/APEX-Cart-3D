@@ -157,7 +157,7 @@ export function TouchControls({
 
   return (
     <div
-      className="pointer-events-none fixed inset-0 z-10 flex flex-col justify-between p-2.5 sm:p-5"
+      className="game-controls pointer-events-none fixed inset-0 z-10 flex flex-col justify-between p-2.5 sm:p-5"
       style={{ touchAction: 'none' }}
     >
       {/* Top bar: perspective selector + audio + camera mode & reset controls */}
@@ -593,7 +593,7 @@ export function TouchControls({
                 label={isWalking ? 'Sprint' : 'Handbrake Drift'}
                 inputKey={isWalking ? 'sprint' : 'drift'}
                 onInputChange={onKartInputChange}
-                className={`h-14 w-13 sm:h-16 sm:w-16 text-white ${
+                className={`h-14 w-14 sm:h-16 sm:w-16 text-white ${
                   isWalking
                     ? 'border-sky-300/45 bg-[rgba(2,132,199,0.86)] active:bg-[#0ea5e9]'
                     : 'border-amber-300/55 bg-[rgba(217,119,6,0.88)] active:bg-[#f59e0b]'

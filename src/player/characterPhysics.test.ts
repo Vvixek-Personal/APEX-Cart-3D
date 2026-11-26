@@ -96,7 +96,7 @@ test('player can enter any chosen car, drive it, exit, and swap to another car',
   assert.equal(charState.mode, 'driving');
   assert.equal(charState.activeVehicleId, 'veh_main_gt');
 
-  // Drive Velocity GT forward using its higher top-speed stats
+  // Drive Velocity GT forward with a progressive, realistic launch
   const curve = createTrackCurve();
   const frames = sampleTrackFrames(curve, 240);
   let gtState = {
@@ -117,7 +117,7 @@ test('player can enter any chosen car, drive it, exit, and swap to another car',
       VEHICLE_CATALOG.sport_gt.stats,
     );
   }
-  assert.ok(gtState.speed > 28, `Velocity GT should reach > 28 u/s, got ${gtState.speed.toFixed(2)}`);
+  assert.ok(gtState.speed > 10 && gtState.speed < 16, `Velocity GT should reach 36–58 km/h after 3 seconds, got ${(gtState.speed * 3.6).toFixed(2)} km/h`);
 });
 
 test('big kart and multi-car fleet have enlarged dimensions and valid spawns', () => {

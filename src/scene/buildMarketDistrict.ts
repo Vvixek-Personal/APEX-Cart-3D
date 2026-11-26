@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { buildStreetDetails } from './buildStreetDetails';
 import { FIELD_HALF, PARK_HALF } from '../track/trackLayout';
 import { ProceduralTextureSet } from './textures';
 import {
@@ -38,28 +39,26 @@ function createSignCanvasTexture(
   maxAnisotropy: number,
 ): THREE.CanvasTexture {
   const canvas = document.createElement('canvas');
-  canvas.width = 512;
-  canvas.height = 128;
+  canvas.width = 1024;
+  canvas.height = 256;
   const ctx = canvas.getContext('2d')!;
-
   ctx.fillStyle = bgHex;
-  ctx.fillRect(0, 0, 512, 128);
-  ctx.fillStyle = accentHex;
-  ctx.fillRect(0, 108, 512, 20);
-  ctx.strokeStyle = '#f7f1e5';
-  ctx.lineWidth = 6;
-  ctx.strokeRect(6, 6, 500, 116);
-
-  ctx.fillStyle = '#ffffff';
-  ctx.font = '900 34px "Inter", "Segoe UI", system-ui, sans-serif';
+  ctx.fillRect(0, 0, 1024, 256);
+  ctx.strokeStyle = accentHex;
+  ctx.lineWidth = 2;
+  ctx.strokeRect(18, 18, 988, 220);
+  ctx.fillStyle = '#eee9dd';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
-  ctx.fillText(title, 256, subtitle ? 44 : 58);
-
+  // Measure before drawing: long names must never be clipped or squeezed.
+  let fontSize = 64;
+  do { ctx.font = `500 ${fontSize--}px "Segoe UI", Arial, sans-serif`; }
+  while (ctx.measureText(title).width > 910 && fontSize > 22);
+  ctx.fillText(title, 512, subtitle ? 100 : 130);
   if (subtitle) {
-    ctx.fillStyle = '#fde047';
-    ctx.font = '800 20px "Inter", "Segoe UI", system-ui, sans-serif';
-    ctx.fillText(subtitle, 256, 84);
+    ctx.fillStyle = '#cbb98f';
+    ctx.font = '400 30px "Segoe UI", Arial, sans-serif';
+    ctx.fillText(subtitle, 512, 174);
   }
 
   const tex = new THREE.CanvasTexture(canvas);
@@ -82,6 +81,8 @@ function createSignCanvasTexture(
 export function buildMarketDistrict(textures: ProceduralTextureSet): MarketDistrictBuildResult {
   const group = new THREE.Group();
   group.name = 'MARKET_AND_RESIDENTIAL_DISTRICT';
+  const streetDetails = buildStreetDetails();
+  group.add(streetDetails.group);
 
   const geometries: THREE.BufferGeometry[] = [];
   const materials: THREE.Material[] = [];
@@ -464,7 +465,7 @@ export function buildMarketDistrict(textures: ProceduralTextureSet): MarketDistr
     buildingParts.push(bGeo);
 
     if (b.hasShopFront && b.signText) {
-      const sTex = createSignCanvasTexture(b.signText, '', '#14212e', '#fbbf24', 2);
+      const sTex = createSignCanvasTexture(b.signText, '', '#243431', '#b8a47a', 8);
       extraTextures.push(sTex);
       const sMesh = new THREE.Mesh(
         trackGeo(new THREE.PlaneGeometry(6.8, 1.5)),
@@ -866,6 +867,21 @@ export function buildMarketDistrict(textures: ProceduralTextureSet): MarketDistr
   buildTreeInst('sakura', sakuraTreeGeo);
   buildTreeInst('ginkgo', ginkgoTreeGeo);
 
+  // World-projected road UVs prevent a 200 m avenue from stretching a single
+  // 256 px tile into long, blurry streaks. Shared track textures remain unchanged.
+  group.updateMatrixWorld(true);
+  const uvPoint = new THREE.Vector3();
+  group.traverse(object => {
+    if (!(object instanceof THREE.Mesh) || object.material !== asphaltMat) return;
+    const positions = object.geometry.getAttribute('position');
+    const uv = object.geometry.getAttribute('uv');
+    for (let i = 0; i < positions.count; i++) {
+      uvPoint.fromBufferAttribute(positions, i).applyMatrix4(object.matrixWorld);
+      uv.setXY(i, uvPoint.x / 4, uvPoint.z / 4);
+    }
+    uv.needsUpdate = true;
+  });
+
   return {
     group,
     update: (elapsedSeconds: number) => {
@@ -875,6 +891,7 @@ export function buildMarketDistrict(textures: ProceduralTextureSet): MarketDistr
       fountainWater.rotation.y = elapsedSeconds * 0.28;
     },
     dispose: () => {
+      streetDetails.dispose();
       for (const g of geometries) g.dispose();
       for (const m of materials) m.dispose();
       for (const t of extraTextures) t.dispose();

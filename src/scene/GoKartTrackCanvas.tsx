@@ -315,7 +315,7 @@ export function GoKartTrackCanvas({
 
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    renderer.toneMappingExposure = 0.96;
+    renderer.toneMappingExposure = 0.88;
     renderer.setPixelRatio(isSoftwareGl ? 1 : Math.min(window.devicePixelRatio, 2));
     renderer.setSize(width, height);
     renderer.shadowMap.enabled = !isSoftwareGl;
@@ -342,6 +342,7 @@ export function GoKartTrackCanvas({
     const pmremGenerator = new THREE.PMREMGenerator(renderer);
     const envTarget = pmremGenerator.fromScene(new RoomEnvironment(), 0.04);
     scene.environment = envTarget.texture;
+    scene.environmentIntensity = 0.45;
     pmremGenerator.dispose();
 
     const maxAnisotropy = isSoftwareGl
@@ -351,7 +352,7 @@ export function GoKartTrackCanvas({
     scene.background = textures.skyBackdrop;
 
     // Bright, soft daylight lighting rig covering both stadium and town district
-    const hemiLight = new THREE.HemisphereLight(0xd9efff, 0x3b8f2e, 0.65);
+    const hemiLight = new THREE.HemisphereLight(0xdce5ec, 0x716951, 0.8);
     hemiLight.position.set(0, 180, 0);
     scene.add(hemiLight);
 
@@ -360,7 +361,7 @@ export function GoKartTrackCanvas({
     sunLight.target.position.set(0, 0, 110);
     scene.add(sunLight.target);
     sunLight.castShadow = !isSoftwareGl;
-    sunLight.shadow.mapSize.set(1024, 1024);
+    sunLight.shadow.mapSize.set(2048, 2048);
     sunLight.shadow.camera.near = 25;
     sunLight.shadow.camera.far = 1100;
     sunLight.shadow.camera.left = -280;
@@ -1024,6 +1025,7 @@ export function GoKartTrackCanvas({
           if (activeVeh) {
             activeVeh.state.speed = 0;
             activeVeh.state.steerAngle = 0;
+            activeVeh.state.throttle = 0;
             activeVeh.state.lateralSpeed = 0;
             activeVeh.state.isDrifting = false;
             activeVeh.state.driftCharge = 0;

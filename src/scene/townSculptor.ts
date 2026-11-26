@@ -12,28 +12,28 @@ export const TOWN_PALETTE = {
   plazaWarmStone: 0xbfb09a,
   plazaRoseStone: 0xcab0a3,
   curbStone: 0x9c9286,
-  grassMeadow: 0x4ca644,
-  grassSunlit: 0x67be57,
+  grassMeadow: 0x64794b,
+  grassSunlit: 0x819162,
   soilWarm: 0x6e503b,
-  waterPool: 0x38bdf8,
-  waterDeep: 0x0284c7,
+  waterPool: 0x729d9e,
+  waterDeep: 0x365d69,
 
   // Facades & trim
-  wallApricot: 0xeba96a,
-  wallCoral: 0xd97d63,
-  wallButtercup: 0xedd08a,
-  wallMint: 0x89b592,
-  wallSage: 0x9cb89b,
-  wallLavender: 0xb2a6be,
-  wallPeriwinkle: 0xa4bde0,
-  wallCreamTrim: 0xf4ecdc,
+  wallApricot: 0xc4a183,
+  wallCoral: 0xad7865,
+  wallButtercup: 0xd3c29a,
+  wallMint: 0x96a18a,
+  wallSage: 0x919b87,
+  wallLavender: 0xa39a9e,
+  wallPeriwinkle: 0x91a3aa,
+  wallCreamTrim: 0xddd6c5,
   wallLimestone: 0xded3be,
-  wallOchre: 0xe2b164,
-  brickTerracotta: 0xbd5d42,
+  wallOchre: 0xb99b6c,
+  brickTerracotta: 0x945c47,
 
   // Roofs, ironwork, wood & shutters
   roofSlate: 0x3c4659,
-  roofTerracotta: 0xc45a3d,
+  roofTerracotta: 0x895849,
   roofCopperPatina: 0x4f9181,
   shutterTeal: 0x3f7c73,
   shutterCobalt: 0x3f6aa3,
@@ -47,12 +47,12 @@ export const TOWN_PALETTE = {
   woodWalnut: 0x583823,
   woodBirch: 0xcba679,
 
-  // Windows (vivid multi-color residential glazing)
-  windowWarmLit: 0xffe07a,
-  windowSkyGlass: 0x73c9f5,
-  windowRoseGlass: 0xf99ab0,
-  windowMintGlass: 0x86e8b5,
-  windowAmberGlass: 0xffc66e,
+  // Quiet sky reflections and occasional warm interior glazing
+  windowWarmLit: 0xbfae84,
+  windowSkyGlass: 0x5b7882,
+  windowRoseGlass: 0x50636d,
+  windowMintGlass: 0x60767a,
+  windowAmberGlass: 0x8c8b78,
   windowDeep: 0x2c4257,
 
   // Awnings, umbrellas & blossoms
@@ -65,10 +65,10 @@ export const TOWN_PALETTE = {
 
   // Flora & trees
   trunkBark: 0x624635,
-  leafSage: 0x569648,
-  leafDeep: 0x387032,
-  sakuraPink: 0xe88488,
-  sakuraBlush: 0xf5a8ad,
+  leafSage: 0x657d4c,
+  leafDeep: 0x405f42,
+  sakuraPink: 0xb88f86,
+  sakuraBlush: 0xd4b3a4,
   ginkgoGold: 0xebb038,
   tulipCoral: 0xef4444,
   tulipYellow: 0xfacc15,
@@ -696,7 +696,7 @@ export function buildSculptedTownhouseGeo(b: SculptedBuildingInput): THREE.Buffe
       for (let ci = 0; ci < cols; ci++) {
         const wx = cols === 1 ? 0 : -((cols - 1) * colSpacing) * 0.5 + ci * colSpacing;
         const winColor = b.windowPalette[(b.index + fl * 3 + ci * 5 + fi) % b.windowPalette.length];
-        const shutterCol = SHUTTER_PALETTE[(b.index + fl + ci + fi) % SHUTTER_PALETTE.length];
+        const shutterCol = SHUTTER_PALETTE[b.index % SHUTTER_PALETTE.length];
 
         // Outer frame + projecting sill + carved stone keystone + lintel header + recessed glass
         pushFaceGeo(rbox(2.15, 2.35, 0.26, 0.06, trim, 1), wx, wy, face.halfDepth + 0.05);
@@ -762,6 +762,22 @@ export function buildSculptedTownhouseGeo(b: SculptedBuildingInput): THREE.Buffe
       { pos: [0, roofBaseY + roofH + 0.1, 0] },
     ),
   );
+
+  // Fine slate/tile courses follow the hipped slope, giving the roofs scale
+  // without thousands of individual tile meshes or extra draw calls.
+  for (let course = 1; course <= 10; course++) {
+    const t = course / 11;
+    const rw = (w + .5) * (1 - (1 - topRatio) * t);
+    const rd = (d + .5) * (1 - (1 - topRatio) * t);
+    const y = roofBaseY + roofH * t + .015;
+    for (const side of [-1, 1]) {
+      for (const [width, depth, x, z] of [[rw, .026, 0, side * rd / 2], [.026, rd, side * rw / 2, 0]]) {
+        const raw = new THREE.BoxGeometry(width, .024, depth);
+        parts.push(transformGeo(paintGeometry(raw, isMansard ? 0x50575e : 0x6f4b3f), { pos: [x, y, z] }));
+        raw.dispose();
+      }
+    }
+  }
 
   if (isMansard) {
     const cw = w * topRatio;
