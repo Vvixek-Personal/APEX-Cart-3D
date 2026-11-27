@@ -4,6 +4,12 @@ import {
   TOWN_PARKING_LOTS,
   TOWN_ROADS,
 } from '../scene/townLayout';
+import {
+  COASTAL_BOUNDS,
+  COASTAL_PLAZA,
+  COASTAL_PLOTS,
+  COASTAL_ROAD_CURVES,
+} from '../scene/coastalCityLayout';
 import { TOWN_VEHICLE_SPAWNS } from '../kart/vehicleCatalog';
 import { generateCheckpoints } from '../game/raceRules';
 import { createTrackCurve, getBannerPlacements, sampleTrackFrames } from '../track/trackLayout';
@@ -20,7 +26,7 @@ const trackPoints = curve.getSpacedPoints(200);
 const checkpoints = generateCheckpoints(sampleTrackFrames(curve, 640), 6);
 const finishPos = getBannerPlacements(curve).finish.position;
 
-export const FULL_MAP_BOUNDS = { xMin: -275, xMax: 275, zMin: -215, zMax: 555 };
+export const FULL_MAP_BOUNDS = { xMin: -275, xMax: 275, zMin: -215, zMax: 1180 };
 
 interface PaintOptions {
   /** World-space center of the view window. */
@@ -57,6 +63,9 @@ const COLOR_VEHICLE = '#d9be8b';
 const COLOR_PLAYER = '#eaf5ec';
 const COLOR_CHECKPOINT = '#e3b264';
 const COLOR_FINISH = '#efe3bb';
+const COLOR_SAND = '#c9b183';
+const COLOR_WATER = '#2e6f8f';
+const COLOR_PLAZA = '#5a5f63';
 
 export function drawWorldMap(canvas: HTMLCanvasElement, opts: PaintOptions): void {
   const ctx = canvas.getContext('2d');
@@ -138,6 +147,68 @@ export function drawWorldMap(canvas: HTMLCanvasElement, opts: PaintOptions): voi
   for (const b of TOWN_BUILDINGS) {
     if (!inView(b.x, b.z, 30)) continue;
     ctx.fillRect(b.x - b.w / 2, b.z - b.d / 2, b.w, b.d);
+  }
+
+  // Coastal City: beach sand, ocean, plaza island, plots & curved roads
+  const cxB = COASTAL_BOUNDS;
+  if (
+    inView(0, (cxB.beachStartZ + cxB.zMax) / 2, 400)
+  ) {
+    // Beach band then ocean
+    ctx.fillStyle = COLOR_SAND;
+    ctx.fillRect(
+      cxB.xMin,
+      cxB.beachStartZ,
+      cxB.xMax - cxB.xMin,
+      cxB.shoreZ - cxB.beachStartZ,
+    );
+    ctx.fillStyle = COLOR_WATER;
+    ctx.fillRect(cxB.xMin, cxB.shoreZ, cxB.xMax - cxB.xMin, cxB.zMax - cxB.shoreZ + 22);
+  }
+
+  // Plaza circle (paved island + ring)
+  if (inView(COASTAL_PLAZA.x, COASTAL_PLAZA.z, COASTAL_PLAZA.radius + 10)) {
+    ctx.fillStyle = COLOR_PLAZA;
+    ctx.beginPath();
+    ctx.arc(COASTAL_PLAZA.x, COASTAL_PLAZA.z, COASTAL_PLAZA.radius, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = COLOR_BLOCK;
+    ctx.beginPath();
+    ctx.arc(COASTAL_PLAZA.x, COASTAL_PLAZA.z, 46, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  // Coastal building plots
+  ctx.fillStyle = COLOR_BUILDING;
+  for (const p of COASTAL_PLOTS) {
+    if (!inView(p.x, p.z, 30)) continue;
+    ctx.fillRect(p.x - p.w / 2, p.z - p.d / 2, p.w, p.d);
+  }
+
+  // Curved coastal roads (stroked polylines, width = road width)
+  for (const rc of COASTAL_ROAD_CURVES) {
+    const pts = rc.curve.getPoints(48);
+    let minx = Infinity;
+    let maxx = -Infinity;
+    let minz = Infinity;
+    let maxz = -Infinity;
+    for (const pt of pts) {
+      if (pt.x < minx) minx = pt.x;
+      if (pt.x > maxx) maxx = pt.x;
+      if (pt.z < minz) minz = pt.z;
+      if (pt.z > maxz) maxz = pt.z;
+    }
+    if (!inView((minx + maxx) / 2, (minz + maxz) / 2, Math.max(maxx - minx, maxz - minz))) continue;
+    ctx.beginPath();
+    pts.forEach((pt, i) => {
+      if (i === 0) ctx.moveTo(pt.x, pt.z);
+      else ctx.lineTo(pt.x, pt.z);
+    });
+    ctx.strokeStyle = rc.closed ? COLOR_ROAD_MAIN : COLOR_ROAD;
+    ctx.lineWidth = rc.width;
+    ctx.lineJoin = 'round';
+    ctx.lineCap = 'round';
+    ctx.stroke();
   }
 
   // Vehicle dots

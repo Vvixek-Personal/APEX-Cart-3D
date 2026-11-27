@@ -57,10 +57,13 @@ import {
 } from '../track/trackLayout';
 import { buildTrackBanners } from './buildBanners';
 import { buildCheckpointMarkers } from './buildCheckpoints';
+import { buildCoastalCity } from './buildCoastalCity';
 import { buildMarketDistrict } from './buildMarketDistrict';
 import { buildStadiumArchitecture } from './buildStadium';
 import { buildTrackEnvironment } from './buildTrackMesh';
 import { DayNightCycle, DayNightSample } from './dayNight';
+import { createNpcSystem } from './npcSystem';
+import { createPostFx } from './postFx';
 import { createProceduralTextures } from './textures';
 import { getWorldGroundSlope, getWorldGroundY } from './townLayout';
 import { VehicleEffectsSystem } from './vehicleEffects';
@@ -378,7 +381,7 @@ export function GoKartTrackCanvas({
     renderer.setPixelRatio(isSoftwareGl ? 1 : Math.min(window.devicePixelRatio, 2));
     renderer.setSize(width, height);
     renderer.shadowMap.enabled = !isSoftwareGl;
-    renderer.shadowMap.type = THREE.PCFShadowMap;
+    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     renderer.domElement.style.display = 'block';
     renderer.domElement.style.width = '100%';
     renderer.domElement.style.height = '100%';
@@ -436,6 +439,11 @@ export function GoKartTrackCanvas({
     sunLight.shadow.radius = 2.5;
     scene.add(sunLight);
 
+    // Shadow frustum follows the player: the world now spans z -196..1150
+    // (Market Town + Coastal City) and a static 2048² frustum can't cover
+    // both cities at full texel density.
+    const shadowFocus = new THREE.Vector2(0, 110);
+
     const fillLight = new THREE.DirectionalLight(0xdceeff, 0.25);
     fillLight.position.set(160, 120, -150);
     scene.add(fillLight);
@@ -447,9 +455,12 @@ export function GoKartTrackCanvas({
       const sample = dayNight.update(dt, dayNightSampleScratch);
       dayNight.paintSky();
 
-      sunLight.position.copy(dayNight.sunDirection).multiplyScalar(360);
-      sunLight.position.y = Math.max(60, sunLight.position.y);
-      sunLight.position.z += 110;
+      sunLight.target.position.set(shadowFocus.x, 0, shadowFocus.y);
+      sunLight.position.set(
+        shadowFocus.x + dayNight.sunDirection.x * 360,
+        Math.max(60, dayNight.sunDirection.y * 360),
+        shadowFocus.y + dayNight.sunDirection.z * 360,
+      );
       sunLight.intensity = dayNight.sunIntensity;
       sunLight.color.copy(dayNight.sunColor);
 
@@ -517,6 +528,16 @@ export function GoKartTrackCanvas({
 
     const marketBuild = buildMarketDistrict(textures);
     scene.add(marketBuild.group);
+
+    // Coastal City — curved-road second city with beach, plaza, shops,
+    // signals, vending and street furniture north of the Market Town.
+    const coastalBuild = buildCoastalCity(textures);
+    scene.add(coastalBuild.group);
+
+    // Pedestrians with per-NPC routines (errands, jog loops, signal waits,
+    // night-time thinning) shared by both cities.
+    const npcSystem = createNpcSystem();
+    scene.add(npcSystem.group);
 
     const bannerBuild = buildTrackBanners(bannerPlacements, textures);
     scene.add(bannerBuild.group);
@@ -620,6 +641,14 @@ export function GoKartTrackCanvas({
     const freeCamCtrl = new FreeCameraController();
     const followCamCtrl = new FollowCameraController();
     const camera = new THREE.PerspectiveCamera(46, currentAspect, 0.4, 4800);
+
+    // Hardware path: HDR render -> subtle bloom -> ACES output. Software GL
+    // keeps the direct renderer.render path (createPostFx returns null there).
+    const postFx = isSoftwareGl ? null : createPostFx(renderer, scene, camera);
+    const renderFrame = () => {
+      if (postFx) postFx.render();
+      else renderer.render(scene, camera);
+    };
 
     const controls = new OrbitControls(camera, renderer.domElement);
     controls.enableDamping = !isSoftwareGl;
@@ -959,6 +988,7 @@ export function GoKartTrackCanvas({
       }
       renderer.setPixelRatio(isSoftwareGl ? 1 : Math.min(window.devicePixelRatio, 2));
       renderer.setSize(w, h);
+      postFx?.setSize(w, h);
     };
     window.addEventListener('resize', onResize);
 
@@ -1057,7 +1087,7 @@ export function GoKartTrackCanvas({
       // Pause menu: freeze the whole simulation, keep rendering the frozen frame
       if (isPausedRef.current) {
         soundEngine.update(idleAudioState, Math.min(rawDt, 0.25));
-        renderer.render(scene, camera);
+        renderFrame();
         if (isSoftwareGl) {
           afterDraw(tick);
         } else {
@@ -1373,6 +1403,10 @@ export function GoKartTrackCanvas({
       }
 
       // Advance the daylight cycle & drive sky, sun, moon, fog and lamp glow
+      const focusSrc = charState.mode === 'driving' && activeVeh ? activeVeh.state : charState;
+      const focusAlpha = Math.min(1, frameDt * 5);
+      shadowFocus.x += (focusSrc.x - shadowFocus.x) * focusAlpha;
+      shadowFocus.y += (focusSrc.z - shadowFocus.y) * focusAlpha;
       const daySample = applyDayNight(frameDt);
       if (daySample.clockLabel !== lastClockLabel) {
         lastClockLabel = daySample.clockLabel;
@@ -1401,6 +1435,8 @@ export function GoKartTrackCanvas({
         elapsedSimSeconds,
       );
       marketBuild.update(elapsedSimSeconds, nightFactor);
+      coastalBuild.update(elapsedSimSeconds, nightFactor);
+      npcSystem.update(elapsedSimSeconds, frameDt, nightFactor);
 
       // Update procedural motorsport & world audio
       const cdCeil = Math.ceil(raceState.countdownSeconds);
@@ -1660,7 +1696,7 @@ export function GoKartTrackCanvas({
         syncAttributes(mode, activePersp);
       }
 
-      renderer.render(scene, camera);
+      renderFrame();
       if (container && container.getAttribute('data-state') !== 'ready') {
         container.setAttribute('data-state', 'ready');
         syncAttributes(mode, activePersp);
@@ -1709,6 +1745,9 @@ export function GoKartTrackCanvas({
       }
       stadiumBuild.dispose();
       marketBuild.dispose();
+      coastalBuild.dispose();
+      npcSystem.dispose();
+      postFx?.dispose();
       trackBuild.dispose();
       bannerBuild.dispose();
       horizonGroundGeo.dispose();

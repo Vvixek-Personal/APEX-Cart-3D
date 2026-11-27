@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { FIELD_HALF, PARK_HALF } from '../track/trackLayout';
 import { STADIUM_CONCOURSE_HALF, TOWN_BOUNDS } from '../scene/townLayout';
+import { COASTAL_BOUNDS, isCoastalWater } from '../scene/coastalCityLayout';
 
 export interface FreeCameraInputState {
   moveForward: boolean;
@@ -66,6 +67,14 @@ export function getFreeCameraMinHeight(x: number, z: number): number {
   }
   if (ax <= PARK_HALF + 2 && (az <= PARK_HALF + 2 || (z > PARK_HALF && z <= TOWN_BOUNDS.zMax + 6))) {
     return 0.8; // Outer landscaped park lawn & town district (y = -0.85..-0.64)
+  }
+  // Coastal City spans z 540..1160 with ground y = -0.85 (beach/water dips to -1.05)
+  if (
+    z >= COASTAL_BOUNDS.zMin - 6 &&
+    z <= COASTAL_BOUNDS.zMax + 6 &&
+    Math.abs(x) <= COASTAL_BOUNDS.xMax + 6
+  ) {
+    return isCoastalWater(x, z) ? -0.2 : 0.8;
   }
   return -2.0; // Surrounding horizon ground plane (y = -4.02)
 }
