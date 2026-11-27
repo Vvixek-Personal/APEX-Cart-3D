@@ -20,7 +20,7 @@ const trackPoints = curve.getSpacedPoints(200);
 const checkpoints = generateCheckpoints(sampleTrackFrames(curve, 640), 6);
 const finishPos = getBannerPlacements(curve).finish.position;
 
-export const FULL_MAP_BOUNDS = { xMin: -205, xMax: 205, zMin: -215, zMax: 465 };
+export const FULL_MAP_BOUNDS = { xMin: -275, xMax: 275, zMin: -215, zMax: 555 };
 
 interface PaintOptions {
   /** World-space center of the view window. */

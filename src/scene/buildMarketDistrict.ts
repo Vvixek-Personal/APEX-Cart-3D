@@ -3,11 +3,14 @@ import { buildStreetDetails } from './buildStreetDetails';
 import { FIELD_HALF, PARK_HALF } from '../track/trackLayout';
 import { ProceduralTextureSet } from './textures';
 import {
+  COL_SPANS,
+  ROW_SPANS,
   TOWN_BENCH_SPOTS,
   TOWN_BLOCKS,
   TOWN_BOUNDS,
   TOWN_BUILDINGS,
   TOWN_CART_SPOTS,
+  TOWN_LANDMARKS,
   TOWN_MARKET_STALLS,
   TOWN_PARKING_LOTS,
   TOWN_PARKS,
@@ -161,10 +164,10 @@ export function buildMarketDistrict(textures: ProceduralTextureSet): MarketDistr
   );
 
   // =========================================================================
-  // 1. BASE TOWN GROUND, STADIUM CONNECTOR RAMP & SMALL MULTI-LANE ROADS
+  // 1. BASE TOWN GROUND, STADIUM CONNECTOR RAMP & 3X WIDER MULTI-LANE ROADS
   // =========================================================================
-  const districtDepth = TOWN_BOUNDS.zMax - TOWN_BOUNDS.zMin + 14;
-  const districtWidth = 376;
+  const districtDepth = TOWN_BOUNDS.zMax - TOWN_BOUNDS.zMin + 18;
+  const districtWidth = TOWN_BOUNDS.xMax - TOWN_BOUNDS.xMin + 24;
   const districtZCenter = TOWN_BOUNDS.zMin + districtDepth * 0.5 - 2;
 
   const groundGeo = trackGeo(new THREE.PlaneGeometry(districtWidth, districtDepth));
@@ -227,9 +230,19 @@ export function buildMarketDistrict(textures: ProceduralTextureSet): MarketDistr
     return arr;
   };
 
+  const nsRoads = TOWN_ROADS.filter((rd) => rd.axis === 'ns' && rd.id !== 'stadium_connector');
+  const ewRoads = TOWN_ROADS.filter((rd) => rd.axis === 'ew');
+  const inAnyEwBand = (z: number) => ewRoads.some((rd) => z >= rd.zMin - 2 && z <= rd.zMax + 2);
+  const inAnyNsBand = (x: number) => nsRoads.some((rd) => x >= rd.xMin - 2 && x <= rd.xMax + 2);
+
   for (const r of TOWN_ROADS) {
+    if (r.id === 'stadium_connector') {
+      // Physically rendered by sloped connectorRamp + innerSpur (z = 99..212)
+      continue;
+    }
+
     if (r.id === 'main_avenue') {
-      const w = r.xMax - r.xMin;
+      const w = r.xMax - r.xMin; // 60 units wide
       const d = r.zMax - PARK_HALF;
       const cz = PARK_HALF + d * 0.5;
       const roadMesh = new THREE.Mesh(trackGeo(new THREE.BoxGeometry(w, 0.14, d)), asphaltMat);
@@ -237,15 +250,17 @@ export function buildMarketDistrict(textures: ProceduralTextureSet): MarketDistr
       roadMesh.receiveShadow = true;
       group.add(roadMesh);
 
-      // Double-yellow center line + dashed white lane dividers for the wide boulevard
-      for (const z of stepRange(215, r.zMax - 2, 5.5)) {
-        stripeInstances.push({ x: -0.42, y: roadY + 0.02, z, sx: 0.18, sz: 3.2, yellow: true });
-        stripeInstances.push({ x: 0.42, y: roadY + 0.02, z, sx: 0.18, sz: 3.2, yellow: true });
-        stripeInstances.push({ x: -5, y: roadY + 0.02, z, sx: 0.16, sz: 2.4, yellow: false });
-        stripeInstances.push({ x: 5, y: roadY + 0.02, z, sx: 0.16, sz: 2.4, yellow: false });
+      // Double-yellow median + 4 dashed white lane dividers across the 6-lane 60-unit boulevard (clear at intersections)
+      for (const z of stepRange(215, r.zMax - 2, 6.0)) {
+        if (inAnyEwBand(z)) continue;
+        stripeInstances.push({ x: -0.46, y: roadY + 0.02, z, sx: 0.22, sz: 3.6, yellow: true });
+        stripeInstances.push({ x: 0.46, y: roadY + 0.02, z, sx: 0.22, sz: 3.6, yellow: true });
+        for (const lx of [-20, -10, 10, 20]) {
+          stripeInstances.push({ x: lx, y: roadY + 0.02, z, sx: 0.2, sz: 2.8, yellow: false });
+        }
       }
-      for (const ex of [r.xMin + 0.34, r.xMax - 0.34]) {
-        const edge = new THREE.Mesh(trackGeo(new THREE.BoxGeometry(0.16, 0.02, d)), paintWhiteMat);
+      for (const ex of [r.xMin + 0.45, r.xMax - 0.45]) {
+        const edge = new THREE.Mesh(trackGeo(new THREE.BoxGeometry(0.22, 0.02, d)), paintWhiteMat);
         edge.position.set(ex, roadY + 0.02, cz);
         group.add(edge);
       }
@@ -262,29 +277,51 @@ export function buildMarketDistrict(textures: ProceduralTextureSet): MarketDistr
     roadMesh.receiveShadow = true;
     group.add(roadMesh);
 
-    if (r.lanes === 2) {
+    if (r.lanes === 4) {
+      // 36-unit wide 4-lane avenue: double-yellow centerline + 2 outer dashed lane lines
       if (r.axis === 'ew') {
-        for (const x of stepRange(r.xMin + 4, r.xMax - 4, 6)) {
-          stripeInstances.push({ x, y: roadY + 0.02, z: cz, sx: 2.5, sz: 0.18, yellow: true });
+        for (const x of stepRange(r.xMin + 5, r.xMax - 5, 6.5)) {
+          if (inAnyNsBand(x)) continue;
+          stripeInstances.push({ x, y: roadY + 0.02, z: cz - 0.42, sx: 3.2, sz: 0.2, yellow: true });
+          stripeInstances.push({ x, y: roadY + 0.02, z: cz + 0.42, sx: 3.2, sz: 0.2, yellow: true });
+          stripeInstances.push({ x, y: roadY + 0.02, z: cz - 9, sx: 2.6, sz: 0.18, yellow: false });
+          stripeInstances.push({ x, y: roadY + 0.02, z: cz + 9, sx: 2.6, sz: 0.18, yellow: false });
         }
       } else {
-        for (const z of stepRange(r.zMin + 4, r.zMax - 4, 6)) {
-          stripeInstances.push({ x: cx, y: roadY + 0.02, z, sx: 0.18, sz: 2.5, yellow: true });
+        for (const z of stepRange(r.zMin + 5, r.zMax - 5, 6.5)) {
+          if (inAnyEwBand(z)) continue;
+          stripeInstances.push({ x: cx - 0.42, y: roadY + 0.02, z, sx: 0.2, sz: 3.2, yellow: true });
+          stripeInstances.push({ x: cx + 0.42, y: roadY + 0.02, z, sx: 0.2, sz: 3.2, yellow: true });
+          stripeInstances.push({ x: cx - 9, y: roadY + 0.02, z, sx: 0.18, sz: 2.6, yellow: false });
+          stripeInstances.push({ x: cx + 9, y: roadY + 0.02, z, sx: 0.18, sz: 2.6, yellow: false });
+        }
+      }
+    } else if (r.lanes === 2) {
+      // 24-unit wide 2-lane street: bold yellow centerline
+      if (r.axis === 'ew') {
+        for (const x of stepRange(r.xMin + 5, r.xMax - 5, 6.5)) {
+          if (inAnyNsBand(x)) continue;
+          stripeInstances.push({ x, y: roadY + 0.02, z: cz, sx: 3.0, sz: 0.22, yellow: true });
+        }
+      } else {
+        for (const z of stepRange(r.zMin + 5, r.zMax - 5, 6.5)) {
+          if (inAnyEwBand(z)) continue;
+          stripeInstances.push({ x: cx, y: roadY + 0.02, z, sx: 0.22, sz: 3.0, yellow: true });
         }
       }
     }
   }
 
-  // Zebra crosswalk stripes at main street intersections
-  for (const cz of [218.0, 226.0, 270.0, 278.0, 370.0, 378.0]) {
-    for (let sx = -9; sx <= 9; sx += 1.6) {
-      stripeInstances.push({ x: sx, y: roadY + 0.025, z: cz, sx: 0.55, sz: 2.1, yellow: false });
+  // Wide zebra crosswalk stripes across the 60-unit Main Avenue & side-street mouths
+  for (const cz of [250.0, 294.0, 326.0, 370.0, 390.0, 434.0, 466.0]) {
+    for (let sx = -27; sx <= 27; sx += 2.2) {
+      stripeInstances.push({ x: sx, y: roadY + 0.025, z: cz, sx: 0.75, sz: 2.8, yellow: false });
     }
   }
-  for (const cx of [-11.5, 11.5]) {
-    for (const cz of [222.0, 274.0, 374.0]) {
-      for (let dz = -3.0; dz <= 3.0; dz += 1.2) {
-        stripeInstances.push({ x: cx, y: roadY + 0.025, z: cz + dz, sx: 2.0, sz: 0.5, yellow: false });
+  for (const cx of [-32.0, 32.0]) {
+    for (const cz of [272.0, 310.0, 380.0, 450.0]) {
+      for (let dz = -11.0; dz <= 11.0; dz += 2.0) {
+        stripeInstances.push({ x: cx, y: roadY + 0.025, z: cz + dz, sx: 2.6, sz: 0.7, yellow: false });
       }
     }
   }
@@ -408,7 +445,7 @@ export function buildMarketDistrict(textures: ProceduralTextureSet): MarketDistr
     }
   }
 
-  // Sculpted parking kiosk at Stadium Main Parking (x = -7.2, z = 246)
+  // Sculpted parking kiosk at Stadium Main Parking (aligned with TOWN_LANDMARKS.kiosk)
   const kioskMesh = new THREE.Mesh(
     trackGeo(
       mergeParts([
@@ -420,7 +457,7 @@ export function buildMarketDistrict(textures: ProceduralTextureSet): MarketDistr
     ),
     sculptedMat,
   );
-  kioskMesh.position.set(-12.7, roadY, 248);
+  kioskMesh.position.set(TOWN_LANDMARKS.kiosk.x, roadY, TOWN_LANDMARKS.kiosk.z);
   kioskMesh.castShadow = true;
   group.add(kioskMesh);
   // Note: Parked vehicles in Row 0 lots and Main Ave are spawned as interactive drivable rigs in GoKartTrackCanvas.tsx.
@@ -551,10 +588,12 @@ export function buildMarketDistrict(textures: ProceduralTextureSet): MarketDistr
     stallParts.push(mergedStall);
   }
 
-  // Festive bunting banners across Row 0 Col 3 Market Promenade (x = 32)
-  for (const bz of [235.5, 244, 252.5, 261]) {
+  // Festive bunting banners across Row 0 Col 3 Market Promenade
+  for (const bz of TOWN_LANDMARKS.marketBuntingZs) {
     stallParts.push(
-      transformGeo(rbox(19.6, 0.08, 0.08, 0.02, TOWN_PALETTE.ironworkPlum, 1), { pos: [32, sidewalkY + 4.25, bz] }),
+      transformGeo(rbox(19.6, 0.08, 0.08, 0.02, TOWN_PALETTE.ironworkPlum, 1), {
+        pos: [TOWN_LANDMARKS.marketPromenadeX, sidewalkY + 4.25, bz],
+      }),
     );
     const buntCols = [
       TOWN_PALETTE.awningCoral,
@@ -567,7 +606,7 @@ export function buildMarketDistrict(textures: ProceduralTextureSet): MarketDistr
       stallParts.push(
         transformGeo(rbox(0.56, 0.65, 0.08, 0.04, buntCols[fi % buntCols.length], 1), {
           rot: [0, 0, Math.PI * 0.25],
-          pos: [23.4 + fi * 2.2, sidewalkY + 3.85, bz],
+          pos: [TOWN_LANDMARKS.marketPromenadeX - 8.6 + fi * 2.2, sidewalkY + 3.85, bz],
         }),
       );
     }
@@ -598,8 +637,8 @@ export function buildMarketDistrict(textures: ProceduralTextureSet): MarketDistr
     new THREE.MeshStandardMaterial({ color: 0x38bdf8, emissive: 0x38bdf8, emissiveIntensity: 0.48 }),
   );
   for (const [ax, az, ayaw] of [
-    [12.7, 248.0, -Math.PI * 0.5],
-    [-12.7, 283.5, Math.PI * 0.5],
+    [TOWN_LANDMARKS.atmEast.x, TOWN_LANDMARKS.atmEast.z, -Math.PI * 0.5],
+    [TOWN_LANDMARKS.atmWest.x, TOWN_LANDMARKS.atmWest.z, Math.PI * 0.5],
   ] as const) {
     const atm = new THREE.Group();
     atm.position.set(ax, sidewalkY, az);
@@ -659,40 +698,43 @@ export function buildMarketDistrict(textures: ProceduralTextureSet): MarketDistr
     }
   }
 
-  // Row 1 Col 3 Central Botanical Park: Carved 3-Tier Limestone Fountain (x = 32, z = 300)
+  // Row 1 Col 3 Central Botanical Park: Carved 3-Tier Limestone Fountain
+  const { x: fx0, z: fz0 } = TOWN_LANDMARKS.fountain;
   parkParts.push(
-    transformGeo(rcyl(8.4, 8.6, 0.14, TOWN_PALETTE.plazaWarmStone, 24), { pos: [32, sidewalkY + 0.12, 300] }),
-    transformGeo(buildThreeTierFountainStoneGeo(), { pos: [32, sidewalkY + 0.18, 300] }),
+    transformGeo(rcyl(8.4, 8.6, 0.14, TOWN_PALETTE.plazaWarmStone, 24), { pos: [fx0, sidewalkY + 0.12, fz0] }),
+    transformGeo(buildThreeTierFountainStoneGeo(), { pos: [fx0, sidewalkY + 0.18, fz0] }),
   );
   // Shimmering water disc & arched water plume (uses reflective waterMat)
   const fountainWater = new THREE.Mesh(trackGeo(new THREE.CylinderGeometry(3.85, 3.85, 0.1, 20)), waterMat);
-  fountainWater.position.set(32, sidewalkY + 0.88, 300);
+  fountainWater.position.set(fx0, sidewalkY + 0.88, fz0);
   const fountainSpout = new THREE.Mesh(trackGeo(new THREE.ConeGeometry(0.32, 0.95, 10)), waterMat);
-  fountainSpout.position.set(32, sidewalkY + 5.15, 300);
+  fountainSpout.position.set(fx0, sidewalkY + 5.15, fz0);
   group.add(fountainWater, fountainSpout);
 
-  // Row 2 Col 3 South Park: Octagonal Timber Gazebo (x = 32, z = 348)
+  // Row 2 Col 3 South Park: Octagonal Timber Gazebo
+  const { x: gx0, z: gz0 } = TOWN_LANDMARKS.gazebo;
   parkParts.push(
-    transformGeo(rcyl(6.8, 7.0, 0.14, TOWN_PALETTE.plazaWarmStone, 18), { pos: [32, sidewalkY + 0.12, 348] }),
-    transformGeo(rcyl(4.1, 4.3, 0.32, TOWN_PALETTE.woodOak, 8), { pos: [32, sidewalkY + 0.32, 348] }),
-    transformGeo(rcyl(0.25, 4.65, 2.2, TOWN_PALETTE.roofTerracotta, 8), { pos: [32, sidewalkY + 4.75, 348] }),
-    transformGeo(smoothSphere(0.38, TOWN_PALETTE.roofCopperPatina, 10, 8), { pos: [32, sidewalkY + 5.95, 348] }),
+    transformGeo(rcyl(6.8, 7.0, 0.14, TOWN_PALETTE.plazaWarmStone, 18), { pos: [gx0, sidewalkY + 0.12, gz0] }),
+    transformGeo(rcyl(4.1, 4.3, 0.32, TOWN_PALETTE.woodOak, 8), { pos: [gx0, sidewalkY + 0.32, gz0] }),
+    transformGeo(rcyl(0.25, 4.65, 2.2, TOWN_PALETTE.roofTerracotta, 8), { pos: [gx0, sidewalkY + 4.75, gz0] }),
+    transformGeo(smoothSphere(0.38, TOWN_PALETTE.roofCopperPatina, 10, 8), { pos: [gx0, sidewalkY + 5.95, gz0] }),
   );
   for (let i = 0; i < 6; i++) {
     const a = (i / 6) * Math.PI * 2;
     parkParts.push(
       transformGeo(rcyl(0.14, 0.16, 3.3, TOWN_PALETTE.woodBirch, 8), {
-        pos: [32 + Math.cos(a) * 3.35, sidewalkY + 2.0, 348 + Math.sin(a) * 3.35],
+        pos: [gx0 + Math.cos(a) * 3.35, sidewalkY + 2.0, gz0 + Math.sin(a) * 3.35],
       }),
     );
   }
 
-  // Row 2 Col 1 West Pocket Park: Clock Obelisk (x = -88, z = 348)
+  // Row 2 Col 1 West Pocket Park: Clock Obelisk
+  const { x: ox0, z: oz0 } = TOWN_LANDMARKS.obelisk;
   parkParts.push(
-    transformGeo(rcyl(5.4, 5.6, 0.14, TOWN_PALETTE.plazaWarmStone, 16), { pos: [-88, sidewalkY + 0.12, 348] }),
-    transformGeo(rbox(2.8, 0.7, 2.8, 0.1, TOWN_PALETTE.wallLimestone, 1), { pos: [-88, sidewalkY + 0.5, 348] }),
-    transformGeo(rcyl(0.45, 0.8, 4.8, TOWN_PALETTE.wallCreamTrim, 4), { rot: [0, Math.PI * 0.25, 0], pos: [-88, sidewalkY + 3.25, 348] }),
-    transformGeo(smoothSphere(0.46, TOWN_PALETTE.brassWarm, 10, 8), { pos: [-88, sidewalkY + 5.85, 348] }),
+    transformGeo(rcyl(5.4, 5.6, 0.14, TOWN_PALETTE.plazaWarmStone, 16), { pos: [ox0, sidewalkY + 0.12, oz0] }),
+    transformGeo(rbox(2.8, 0.7, 2.8, 0.1, TOWN_PALETTE.wallLimestone, 1), { pos: [ox0, sidewalkY + 0.5, oz0] }),
+    transformGeo(rcyl(0.45, 0.8, 4.8, TOWN_PALETTE.wallCreamTrim, 4), { rot: [0, Math.PI * 0.25, 0], pos: [ox0, sidewalkY + 3.25, oz0] }),
+    transformGeo(smoothSphere(0.46, TOWN_PALETTE.brassWarm, 10, 8), { pos: [ox0, sidewalkY + 5.85, oz0] }),
   );
 
   // Curved-slat sculpted Paris-green & Oak Park Benches (shared data, solid)
@@ -709,14 +751,14 @@ export function buildMarketDistrict(textures: ProceduralTextureSet): MarketDistr
 
   // Brick-bordered Botanical Flowerbeds with dense tulip/lavender blooms
   const bedCoords: Array<[number, number, number]> = [
-    [19, 286.0, TOWN_PALETTE.tulipCoral],
-    [45, 286.0, TOWN_PALETTE.tulipYellow],
-    [19, 312.0, TOWN_PALETTE.lavenderSprig],
-    [45, 312.0, TOWN_PALETTE.sakuraPink],
-    [19, 334.0, TOWN_PALETTE.tulipYellow],
-    [45, 358.0, TOWN_PALETTE.tulipCoral],
-    [-74.5, 334.0, TOWN_PALETTE.sakuraPink],
-    [-101, 358.0, TOWN_PALETTE.tulipYellow],
+    [fx0 - 13, fz0 - 12.5, TOWN_PALETTE.tulipCoral],
+    [fx0 + 13, fz0 - 12.5, TOWN_PALETTE.tulipYellow],
+    [fx0 - 13, fz0 + 12.5, TOWN_PALETTE.lavenderSprig],
+    [fx0 + 13, fz0 + 12.5, TOWN_PALETTE.sakuraPink],
+    [gx0 - 13, gz0 - 12.5, TOWN_PALETTE.tulipYellow],
+    [gx0 + 13, gz0 + 12.5, TOWN_PALETTE.tulipCoral],
+    [ox0 - 13, oz0 - 12.5, TOWN_PALETTE.sakuraPink],
+    [ox0 + 13, oz0 + 12.5, TOWN_PALETTE.tulipYellow],
   ];
   for (const [fx, fz, fCol] of bedCoords) {
     parkParts.push(
@@ -742,28 +784,37 @@ export function buildMarketDistrict(textures: ProceduralTextureSet): MarketDistr
   // =========================================================================
   const streetFurnitureParts: THREE.BufferGeometry[] = [];
 
-  // Café outdoor patio umbrellas & tables outside Row 1 Col 2 Main Ave Café (x = -11.8, z = 284..298)
-  for (const pz of [284, 291, 298]) {
-    const uCol = pz === 291 ? TOWN_PALETTE.awningCobalt : TOWN_PALETTE.awningCoral;
+  // Café outdoor patio umbrellas & tables outside Row 1 Col 2 Main Ave Café
+  for (const pz of TOWN_LANDMARKS.cafePatioZs) {
+    const uCol = pz === TOWN_LANDMARKS.cafePatioZs[1] ? TOWN_PALETTE.awningCobalt : TOWN_PALETTE.awningCoral;
     streetFurnitureParts.push(
-      transformGeo(rcyl(0.06, 0.08, 2.45, TOWN_PALETTE.ironworkPlum, 6), { pos: [-11.8, sidewalkY + 1.22, pz] }),
-      transformGeo(rcyl(0.88, 0.88, 0.09, TOWN_PALETTE.wallCreamTrim, 12), { pos: [-11.8, sidewalkY + 0.82, pz] }),
-      transformGeo(rcyl(0.12, 1.65, 0.68, uCol, 8), { pos: [-11.8, sidewalkY + 2.58, pz] }),
+      transformGeo(rcyl(0.06, 0.08, 2.45, TOWN_PALETTE.ironworkPlum, 6), {
+        pos: [TOWN_LANDMARKS.cafePatioX, sidewalkY + 1.22, pz],
+      }),
+      transformGeo(rcyl(0.88, 0.88, 0.09, TOWN_PALETTE.wallCreamTrim, 12), {
+        pos: [TOWN_LANDMARKS.cafePatioX, sidewalkY + 0.82, pz],
+      }),
+      transformGeo(rcyl(0.12, 1.65, 0.68, uCol, 8), {
+        pos: [TOWN_LANDMARKS.cafePatioX, sidewalkY + 2.58, pz],
+      }),
     );
   }
 
-  // Sculpted Bus Stop Shelter on West Shop Street (Row 2 Col 2 edge, x = -52.7, z = 348)
+  // Sculpted Bus Stop Shelter on West Shop Street (Row 2 Col 2 west curb)
+  const { x: bsx, z: bsz } = TOWN_LANDMARKS.busShelter;
   streetFurnitureParts.push(
-    transformGeo(rbox(0.18, 2.75, 5.2, 0.05, TOWN_PALETTE.windowSkyGlass, 1), { pos: [-52.1, sidewalkY + 1.38, 348] }),
-    transformGeo(rbox(2.1, 0.2, 5.6, 0.08, TOWN_PALETTE.awningCobalt, 1), { pos: [-52.7, sidewalkY + 2.82, 348] }),
-    transformGeo(rbox(0.58, 0.14, 3.6, 0.04, TOWN_PALETTE.woodOak, 1), { pos: [-52.5, sidewalkY + 0.56, 348] }),
-    transformGeo(rcyl(0.08, 0.08, 3.1, TOWN_PALETTE.ironworkPlum, 6), { pos: [-53.0, sidewalkY + 1.55, 351.3] }),
-    transformGeo(rbox(0.14, 0.85, 0.85, 0.04, TOWN_PALETTE.awningGold, 1), { pos: [-53.0, sidewalkY + 2.85, 351.3] }),
+    transformGeo(rbox(0.18, 2.75, 5.2, 0.05, TOWN_PALETTE.windowSkyGlass, 1), { pos: [bsx + 0.6, sidewalkY + 1.38, bsz] }),
+    transformGeo(rbox(2.1, 0.2, 5.6, 0.08, TOWN_PALETTE.awningCobalt, 1), { pos: [bsx, sidewalkY + 2.82, bsz] }),
+    transformGeo(rbox(0.58, 0.14, 3.6, 0.04, TOWN_PALETTE.woodOak, 1), { pos: [bsx + 0.2, sidewalkY + 0.56, bsz] }),
+    transformGeo(rcyl(0.08, 0.08, 3.1, TOWN_PALETTE.ironworkPlum, 6), { pos: [bsx - 0.3, sidewalkY + 1.55, bsz + 3.3] }),
+    transformGeo(rbox(0.14, 0.85, 0.85, 0.04, TOWN_PALETTE.awningGold, 1), { pos: [bsx - 0.3, sidewalkY + 2.85, bsz + 3.3] }),
   );
 
   // Brick street planters along Main Avenue (shared data = solid colliders)
+  const patioMinZ = Math.min(...TOWN_LANDMARKS.cafePatioZs) - 4;
+  const patioMaxZ = Math.max(...TOWN_LANDMARKS.cafePatioZs) + 4;
   for (const planter of TOWN_PLANTER_SPOTS) {
-    if (planter.x < 0 && planter.z >= 280 && planter.z <= 302) continue; // Keep clear for Café patio
+    if (planter.x < 0 && planter.z >= patioMinZ && planter.z <= patioMaxZ) continue;
     streetFurnitureParts.push(
       transformGeo(rbox(1.35, 0.58, 1.35, 0.08, TOWN_PALETTE.brickTerracotta, 1), {
         pos: [planter.x, sidewalkY + 0.29, planter.z],
@@ -785,15 +836,20 @@ export function buildMarketDistrict(textures: ProceduralTextureSet): MarketDistr
   furnitureMesh.receiveShadow = true;
   group.add(furnitureMesh);
 
-  // Victorian Streetlamps (InstancedMesh) along the wide avenues
+  // Victorian Streetlamps (InstancedMesh) along the 3x-wider avenues & cross-streets
   const streetLightCoords: Array<[number, number, number]> = [];
-  for (const sz of [219, 244, 268, 290, 316, 344, 374, 402]) {
-    streetLightCoords.push([-11.6, sz, Math.PI * 0.5]);
-    streetLightCoords.push([11.6, sz, -Math.PI * 0.5]);
+  for (const [zMin, zMax] of ROW_SPANS) {
+    streetLightCoords.push([-31.4, zMin + 13, Math.PI * 0.5]);
+    streetLightCoords.push([31.4, zMin + 13, -Math.PI * 0.5]);
+    streetLightCoords.push([-31.4, zMax - 13, Math.PI * 0.5]);
+    streetLightCoords.push([31.4, zMax - 13, -Math.PI * 0.5]);
   }
-  for (const sx of [-138, -88, -32, 32, 88, 138]) {
-    streetLightCoords.push([sx, 274, 0]);
-    streetLightCoords.push([sx, 374, 0]);
+  for (const [xMin, xMax] of COL_SPANS) {
+    const cx = (xMin + xMax) * 0.5;
+    for (const [zMin, zMax] of ROW_SPANS) {
+      streetLightCoords.push([cx, zMin + 1.5, Math.PI]);
+      streetLightCoords.push([cx, zMax - 1.5, 0]);
+    }
   }
 
   const lampPostGeo = trackGeo(buildVictorianLampPostGeo());

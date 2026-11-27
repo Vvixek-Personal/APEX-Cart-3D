@@ -41,9 +41,9 @@ export function buildStreetDetails() {
     }
   }
 
-  for (const r of TOWN_ROADS.filter(r => r.axis === 'ns')) {
+  for (const r of TOWN_ROADS.filter(r => r.axis === 'ns' && r.id !== 'stadium_connector')) {
     const x = (r.xMin + r.xMax) / 2 + .85;
-    for (let z = 246; z < 402; z += 47) {
+    for (let z = 246; z < TOWN_BOUNDS.zMax - 12; z += 54) {
       cylinder(.43, .018, x, roadY + .021, z, 0x505954);
       cylinder(.36, .021, x, roadY + .024, z, 0x39433f);
       for (const offset of [-.18, 0, .18]) box(.48, .008, .025, x, roadY + .04, z + offset, 0x69726a);
@@ -87,7 +87,12 @@ export function buildStreetDetails() {
   resources.push(texture);
   const signMat = new THREE.MeshStandardMaterial({ map: texture, roughness: .7, side: THREE.DoubleSide });
   resources.push(signMat);
-  for (const [x, z, yaw] of [[11.8, 291, 0], [-11.8, 249, Math.PI], [11.8, 345, 0]]) {
+  for (const [x, z, yaw] of [
+    [-31.6, 260, Math.PI],
+    [31.6, 332, 0],
+    [31.6, 402, 0],
+    [-31.6, 476, Math.PI],
+  ]) {
     cylinder(.045, 3.4, x, walkY + 1.7, z, 0x787b70);
     const geo = new THREE.PlaneGeometry(.92, .92);
     const uv = geo.getAttribute('uv');

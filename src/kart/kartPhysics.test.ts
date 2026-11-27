@@ -51,7 +51,8 @@ test('all town buildings fit strictly inside uniform blocks without blocking roa
 test('kart drives freely along town road and straight through open South Stadium Gate without walls', () => {
   const curve = createTrackCurve();
   const frames = sampleTrackFrames(curve, 240);
-  let state = createInitialKartState(curve);
+  // Align into the center approach lane (x = 0) aiming straight at the South Gate
+  let state = { ...createInitialKartState(curve), x: 0 };
 
   const driveInput = {
     accelerate: true,
@@ -74,23 +75,26 @@ test('kart drives freely along town road and straight through open South Stadium
   assert.ok(state.speed > 15, `Kart should remain at driving speed on track spur, got ${state.speed.toFixed(2)}`);
 });
 
-test('town includes wide GTA-scale main roads plus narrower side lanes', () => {
-  const widths = TOWN_ROADS.map((r) => (r.axis === 'ns' ? r.xMax - r.xMin : r.zMax - r.zMin));
-  const mainRoads = TOWN_ROADS.filter((r) => {
+test('town includes 3x-wider 60-unit main boulevard, 36-unit avenues, and 24-unit side streets', () => {
+  const widths = TOWN_ROADS.filter((r) => r.id !== 'stadium_connector').map((r) =>
+    r.axis === 'ns' ? r.xMax - r.xMin : r.zMax - r.zMin,
+  );
+  const mainAve = TOWN_ROADS.find((r) => r.id === 'main_avenue');
+  const mainAveWidth = mainAve ? mainAve.xMax - mainAve.xMin : 0;
+  const secondaryAves = TOWN_ROADS.filter((r) => {
     const width = r.axis === 'ns' ? r.xMax - r.xMin : r.zMax - r.zMin;
-    return width >= 18;
+    return r.id !== 'main_avenue' && width >= 36;
   });
   const sideLanes = TOWN_ROADS.filter((r) => {
     const width = r.axis === 'ns' ? r.xMax - r.xMin : r.zMax - r.zMin;
-    return width <= 9;
+    return r.id !== 'stadium_connector' && width === 24;
   });
-  const twoLaneRoads = TOWN_ROADS.filter((r) => r.lanes >= 2);
   const narrowest = Math.min(...widths);
 
-  assert.ok(mainRoads.length >= 1, 'Town should have at least one wide main avenue');
-  assert.ok(sideLanes.length >= 5, 'Town should keep several narrower side lanes');
-  assert.ok(twoLaneRoads.length >= 6, 'Major streets should carry two lanes or more');
-  assert.ok(narrowest >= 8, 'Even neighborhood lanes stay GTA-scale generous (>= 8 units)');
+  assert.equal(mainAveWidth, 60, 'Main Avenue should be 3x wider (60 units)');
+  assert.ok(secondaryAves.length >= 5, 'Town should have 36-unit 4-lane secondary avenues');
+  assert.ok(sideLanes.length >= 6, 'Town should have 24-unit 2-lane side streets');
+  assert.ok(narrowest >= 24, 'Even neighborhood lanes stay 3x wider (>= 24 units)');
 });
 
 test('ground elevation ramps smoothly from town road up to stadium field', () => {

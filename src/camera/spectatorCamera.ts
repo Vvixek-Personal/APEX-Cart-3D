@@ -210,11 +210,11 @@ export class SpectatorCameraController {
       -resp.kartBiasMaxOffset,
       resp.kartBiasMaxOffset,
     );
-    const townCenterPull = kartZ > 156 ? 115 : 0;
+    const townCenterPull = kartZ > 156 ? 165 : 0;
     const biasZ = THREE.MathUtils.clamp(
       townCenterPull + kartZ * resp.kartBiasWeight,
       -resp.kartBiasMaxOffset,
-      145,
+      215,
     );
     this.targetScratch.set(biasX, this.config.spectatorTargetHeight, biasZ);
 
@@ -258,13 +258,14 @@ export class SpectatorCameraController {
     this.anchors[19].set(towerXZ, towerY, towerXZ);
     this.anchors[20].set(0, 8, 150);
 
-    // 21..24: Extend south anchors to include the Town District when kart is in town
+    // 21..24: Extend anchors to include the widened Town District when kart is in town
     const outerExt = resp.prioritizeTrackAndKart ? sH : this.bounds.stadiumHalfExtent;
-    const southExt = kartZ > 156 ? 410 : outerExt;
-    this.anchors[21].set(-outerExt, 0, -outerExt);
-    this.anchors[22].set(outerExt, 0, -outerExt);
-    this.anchors[23].set(-outerExt, 0, southExt);
-    this.anchors[24].set(outerExt, 0, southExt);
+    const sideExt = kartZ > 156 ? Math.max(outerExt, 252) : outerExt;
+    const southExt = kartZ > 156 ? 540 : outerExt;
+    this.anchors[21].set(-sideExt, 0, -outerExt);
+    this.anchors[22].set(sideExt, 0, -outerExt);
+    this.anchors[23].set(-sideExt, 0, southExt);
+    this.anchors[24].set(sideExt, 0, southExt);
 
     const maxAllowedNdc = 1 - resp.padding;
     const fov = resp.fov;

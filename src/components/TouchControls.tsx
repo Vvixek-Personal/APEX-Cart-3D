@@ -147,8 +147,34 @@ export function TouchControls({
       className="game-controls pointer-events-none fixed inset-0 z-10 flex flex-col justify-between p-2.5 sm:p-5"
       style={{ touchAction: 'none' }}
     >
-      {/* Single icon-only pause button (desktop ESC works too) */}
-      <div className="flex items-center justify-end">
+      {/* Top-right icon-only action buttons (Exit Vehicle when driving + Pause) */}
+      <div className="flex items-center justify-end gap-2.5">
+        {cameraMode !== 'free' && playerInfo.mode === 'driving' && (
+          <button
+            type="button"
+            onClick={onVehicleInteract}
+            onPointerDown={stopCanvasPointer}
+            data-testid="vehicle-interact-btn"
+            aria-label="Exit vehicle"
+            style={{ touchAction: 'none' }}
+            className="pointer-events-auto select-none flex items-center justify-center rounded-xl w-10 h-10 shadow-md active:scale-95 transition-transform duration-75"
+          >
+            <svg
+              width="20"
+              height="20"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden="true"
+            >
+              <path d="M14.5 5h-5L7 8H4a2 2 0 0 0-2 2v7a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-7a2 2 0 0 0-2-2h-3l-2.5-3z" />
+              <path d="M8 19l1.2-3.4A2 2 0 0 1 11.1 14h1.8a2 2 0 0 1 1.9 1.6L16 19" />
+            </svg>
+          </button>
+        )}
         <button
           type="button"
           onClick={onPause}
@@ -166,15 +192,15 @@ export function TouchControls({
       </div>
 
       <div className="flex flex-col gap-2">
-        {/* Icon-only enter / exit vehicle button (works on touch; desktop uses E) */}
-        {cameraMode !== 'free' && canInteractVehicle && (
+        {/* Icon-only enter vehicle button while walking (bottom-center is free of HUD) */}
+        {cameraMode !== 'free' && playerInfo.mode === 'walking' && canInteractVehicle && (
           <div className="flex justify-center">
             <button
               type="button"
               onClick={onVehicleInteract}
               onPointerDown={stopCanvasPointer}
               data-testid="vehicle-interact-btn"
-              aria-label={playerInfo.mode === 'driving' ? 'Exit vehicle' : 'Enter vehicle'}
+              aria-label="Enter vehicle"
               style={{ touchAction: 'none' }}
               className="pointer-events-auto select-none flex items-center justify-center rounded-full border-2 w-14 h-14 shadow-xl active:scale-95 transition-transform duration-75"
             >
@@ -189,18 +215,9 @@ export function TouchControls({
                 strokeLinejoin="round"
                 aria-hidden="true"
               >
-                {playerInfo.mode === 'driving' ? (
-                  <>
-                    <path d="M14.5 5h-5L7 8H4a2 2 0 0 0-2 2v7a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-7a2 2 0 0 0-2-2h-3l-2.5-3z" />
-                    <path d="M8 19l1.2-3.4A2 2 0 0 1 11.1 14h1.8a2 2 0 0 1 1.9 1.6L16 19" />
-                  </>
-                ) : (
-                  <>
-                    <path d="M5 17h14l-1.6-5.2A3 3 0 0 0 14.5 9.6h-5A3 3 0 0 0 6.6 11.8L5 17z" />
-                    <path d="M7 17v2M17 17v2" />
-                    <path d="M9.5 13h5" />
-                  </>
-                )}
+                <path d="M5 17h14l-1.6-5.2A3 3 0 0 0 14.5 9.6h-5A3 3 0 0 0 6.6 11.8L5 17z" />
+                <path d="M7 17v2M17 17v2" />
+                <path d="M9.5 13h5" />
               </svg>
             </button>
           </div>

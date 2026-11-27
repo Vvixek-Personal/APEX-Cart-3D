@@ -426,11 +426,11 @@ export function GoKartTrackCanvas({
     sunLight.castShadow = !isSoftwareGl;
     sunLight.shadow.mapSize.set(2048, 2048);
     sunLight.shadow.camera.near = 25;
-    sunLight.shadow.camera.far = 1100;
-    sunLight.shadow.camera.left = -280;
-    sunLight.shadow.camera.right = 280;
-    sunLight.shadow.camera.top = 340;
-    sunLight.shadow.camera.bottom = -340;
+    sunLight.shadow.camera.far = 1250;
+    sunLight.shadow.camera.left = -310;
+    sunLight.shadow.camera.right = 310;
+    sunLight.shadow.camera.top = 440;
+    sunLight.shadow.camera.bottom = -360;
     sunLight.shadow.bias = -0.0008;
     sunLight.shadow.normalBias = 0.18;
     sunLight.shadow.radius = 2.5;
@@ -1431,9 +1431,12 @@ export function GoKartTrackCanvas({
       prevSoundWrongWay = raceState.isWrongWay;
 
       const gearCount = activeVeh
-        ? activeVeh.spec.bodyStyle === 'formula'
+        ? activeVeh.spec.bodyStyle === 'formula' || activeVeh.spec.bodyStyle === 'supercar'
           ? 6
-          : activeVeh.spec.bodyStyle === 'kart' || activeVeh.spec.bodyStyle === 'cruiser'
+          : activeVeh.spec.bodyStyle === 'kart' ||
+              activeVeh.spec.bodyStyle === 'cruiser' ||
+              activeVeh.spec.bodyStyle === 'buggy' ||
+              activeVeh.spec.bodyStyle === 'vintage'
             ? 4
             : 5
         : 5;
@@ -1658,6 +1661,10 @@ export function GoKartTrackCanvas({
       }
 
       renderer.render(scene, camera);
+      if (container && container.getAttribute('data-state') !== 'ready') {
+        container.setAttribute('data-state', 'ready');
+        syncAttributes(mode, activePersp);
+      }
       if (isSoftwareGl) {
         afterDraw(tick);
       } else {
@@ -1665,7 +1672,6 @@ export function GoKartTrackCanvas({
       }
     }
 
-    container.setAttribute('data-state', 'ready');
     syncAttributes(cameraModeRef.current, perspectiveRef.current);
 
     tick();

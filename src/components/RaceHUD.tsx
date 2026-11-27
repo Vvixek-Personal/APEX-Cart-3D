@@ -117,9 +117,9 @@ function MinimapCanvas({
       last = key;
       drawWorldMap(canvas, {
         centerX: player.posX ?? 0,
-        centerZ: player.posZ ?? 296,
-        spanX: 190,
-        spanZ: 190,
+        centerZ: player.posZ ?? 346,
+        spanX: 250,
+        spanZ: 250,
         size: canvas.clientWidth || 172,
         showVehicles: true,
         playerX: player.posX ?? 0,

@@ -58,10 +58,10 @@ export const KART_PHYSICS: VehiclePhysicsStats & {
   steerResponseRate: 4.2,
   kartRadius: 1.38,
   wheelRadius: 0.44,
-  worldMinX: -174,
-  worldMaxX: 174,
+  worldMinX: -252,
+  worldMaxX: 252,
   worldMinZ: -196,
-  worldMaxZ: 424,
+  worldMaxZ: 534,
 };
 
 /**

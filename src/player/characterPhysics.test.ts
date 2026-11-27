@@ -10,7 +10,8 @@ import {
 } from './characterPhysics';
 import { TOWN_VEHICLE_SPAWNS, VEHICLE_CATALOG } from '../kart/vehicleCatalog';
 import { createTrackCurve, sampleTrackFrames } from '../track/trackLayout';
-import { stepKartPhysics } from '../kart/kartPhysics';
+import { resolveStaticCollisions, stepKartPhysics } from '../kart/kartPhysics';
+import { isPositionOnTownRoad } from '../scene/townLayout';
 
 test('character spawns walking on Main Avenue within reach of oversized Mega Kart', () => {
   const charState = createInitialCharacterState();
@@ -122,14 +123,35 @@ test('player can enter any chosen car, drive it, exit, and swap to another car',
   assert.ok(gtState.speed > 10 && gtState.speed < 16, `Velocity GT should reach 36–58 km/h after 3 seconds, got ${(gtState.speed * 3.6).toFixed(2)} km/h`);
 });
 
-test('big kart and multi-car fleet have enlarged dimensions and valid spawns', () => {
+test('big kart and multi-car fleet have enlarged dimensions, diverse body styles, and non-overlapping road/lot spawns', () => {
   assert.ok(VEHICLE_CATALOG.big_kart.stats.kartRadius >= 1.35, 'Mega Kart must have enlarged collision radius');
-  assert.ok(TOWN_VEHICLE_SPAWNS.length >= 8, 'Town should contain multiple selectable parked cars and karts');
+  assert.ok(TOWN_VEHICLE_SPAWNS.length >= 20, 'Town should contain an expanded multi-vehicle fleet');
+
+  const uniqueBodyStyles = new Set(Object.values(VEHICLE_CATALOG).map((v) => v.bodyStyle));
+  assert.ok(uniqueBodyStyles.size >= 15, `Expected at least 15 distinct vehicle body styles, got ${uniqueBodyStyles.size}`);
 
   const uniqueIds = new Set(TOWN_VEHICLE_SPAWNS.map((s) => s.instanceId));
   assert.equal(uniqueIds.size, TOWN_VEHICLE_SPAWNS.length);
-  for (const s of TOWN_VEHICLE_SPAWNS) {
-    assert.ok(VEHICLE_CATALOG[s.specId], `Missing vehicle spec ${s.specId}`);
+  for (let i = 0; i < TOWN_VEHICLE_SPAWNS.length; i++) {
+    const s = TOWN_VEHICLE_SPAWNS[i];
+    const spec = VEHICLE_CATALOG[s.specId];
+    assert.ok(spec, `Missing vehicle spec ${s.specId}`);
+    assert.equal(
+      isPositionOnTownRoad(s.x, s.z),
+      true,
+      `Vehicle ${s.instanceId} at (${s.x}, ${s.z}) must spawn on road or parking lot`,
+    );
+    const hit = resolveStaticCollisions(s.x, s.z, spec.stats.kartRadius);
+    assert.equal(hit.collided, false, `Vehicle ${s.instanceId} must not overlap static colliders`);
+    for (let j = i + 1; j < TOWN_VEHICLE_SPAWNS.length; j++) {
+      const o = TOWN_VEHICLE_SPAWNS[j];
+      const oSpec = VEHICLE_CATALOG[o.specId];
+      const dist = Math.hypot(s.x - o.x, s.z - o.z);
+      assert.ok(
+        dist > spec.stats.kartRadius + oSpec.stats.kartRadius,
+        `Vehicles ${s.instanceId} and ${o.instanceId} overlap (dist=${dist.toFixed(2)})`,
+      );
+    }
   }
 });
 

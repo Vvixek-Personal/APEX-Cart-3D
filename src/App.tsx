@@ -22,10 +22,13 @@ import {
   RaceState,
   createInitialRaceState,
 } from './game/raceRules';
+import { createInitialCharacterState } from './player/characterPhysics';
 import { DayNightSample } from './scene/dayNight';
 import { GoKartTrackCanvas } from './scene/GoKartTrackCanvas';
 
 const DEFAULT_MAP_KEY = 'KeyM';
+
+const _initialChar = createInitialCharacterState();
 
 const INITIAL_PLAYER_HUD: PlayerHudInfo = {
   mode: 'walking',
@@ -42,9 +45,9 @@ const INITIAL_PLAYER_HUD: PlayerHudInfo = {
   driftCharge: 0,
   boostTimer: 0,
   isOffTrack: false,
-  posX: 5.4,
-  posZ: 297.8,
-  heading: Math.PI,
+  posX: _initialChar.x,
+  posZ: _initialChar.z,
+  heading: _initialChar.yaw,
 };
 
 const INITIAL_DAY_NIGHT: DayNightSample = {

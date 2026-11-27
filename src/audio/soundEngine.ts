@@ -20,12 +20,20 @@ const ENGINE_TONE_PRESETS: Record<
 > = {
   kart: { baseHz: 68, maxHz: 235, subMult: 0.5, gears: 4, filterMaxHz: 1550 },
   formula: { baseHz: 95, maxHz: 390, subMult: 1.5, gears: 6, filterMaxHz: 2600 },
+  supercar: { baseHz: 78, maxHz: 320, subMult: 1.25, gears: 6, filterMaxHz: 2250 },
   sport: { baseHz: 56, maxHz: 215, subMult: 0.5, gears: 5, filterMaxHz: 1450 },
+  muscle: { baseHz: 46, maxHz: 195, subMult: 0.5, gears: 5, filterMaxHz: 1380 },
+  police: { baseHz: 55, maxHz: 212, subMult: 0.5, gears: 5, filterMaxHz: 1420 },
   rally: { baseHz: 62, maxHz: 245, subMult: 0.75, gears: 5, filterMaxHz: 1700 },
+  buggy: { baseHz: 64, maxHz: 225, subMult: 0.65, gears: 4, filterMaxHz: 1500 },
+  vintage: { baseHz: 50, maxHz: 180, subMult: 0.5, gears: 4, filterMaxHz: 1200 },
   cruiser: { baseHz: 46, maxHz: 165, subMult: 0.5, gears: 4, filterMaxHz: 1050 },
   taxi: { baseHz: 52, maxHz: 190, subMult: 0.5, gears: 5, filterMaxHz: 1250 },
   van: { baseHz: 42, maxHz: 150, subMult: 0.55, gears: 5, filterMaxHz: 950 },
+  ambulance: { baseHz: 43, maxHz: 156, subMult: 0.6, gears: 5, filterMaxHz: 980 },
   pickup: { baseHz: 44, maxHz: 168, subMult: 0.7, gears: 5, filterMaxHz: 1050 },
+  firetruck: { baseHz: 36, maxHz: 128, subMult: 0.8, gears: 5, filterMaxHz: 860 },
+  truck: { baseHz: 35, maxHz: 125, subMult: 0.82, gears: 5, filterMaxHz: 840 },
   bus: { baseHz: 34, maxHz: 120, subMult: 0.85, gears: 5, filterMaxHz: 800 },
 };
 
