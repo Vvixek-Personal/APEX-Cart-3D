@@ -1,8 +1,8 @@
-# APEX Kart 3D — Open-World Town & Stadium Grand Prix
+# APEX Kart 3D — Open-World Town, Coastal City & Stadium Grand Prix
 
 A zero-asset, procedurally sculpted 3D open-world driving, karting, and third/first-person exploration game built with **React 19**, **Three.js**, **TypeScript**, and **Vite 8**.
 
-Spawn on foot in a sunlit European market town, inspect and enter any of **8 drivable vehicles** across **5 distinct chassis classes** (from the twin-engine **Apex Mega Kart** to the **Monza Arrow** open-wheel racer), cruise through town streets and botanical parks, and drive north through the **South Stadium Gate** to trigger a **3-lap clockwise Grand Prix** with live sector checkpoints, progressive throttle and grip-limited driving physics, FIA corner kerbs, tire skid marks, procedural Web Audio synthesis, and multi-angle broadcast cameras.
+Spawn on foot in a sunlit European market town, inspect and enter any of **8 drivable vehicles** across **5 distinct chassis classes** (from the twin-engine **Apex Mega Kart** to the **Monza Arrow** open-wheel racer), cruise through town streets and botanical parks, then drive north past the Market Town into the **Coastal City** — a second city of spline-curved roads, a palm plaza, shopfronts, vending machines, traffic signals, and a sandy beach with pier and animated ocean, populated by **60 NPCs each following their own daily routine** (errands, jog loops, signal waits) that thins out at night. Back at the stadium, the **South Stadium Gate** triggers a **3-lap clockwise Grand Prix** with live sector checkpoints, progressive throttle and grip-limited driving physics, FIA corner kerbs, tire skid marks, procedural Web Audio synthesis, and multi-angle broadcast cameras. Hardware rendering runs an HDR post-processing chain (subtle bloom + ACES tone mapping, 4× MSAA, player-following soft shadows); software WebGL automatically falls back to direct rendering.
 
 ---
 
@@ -62,6 +62,9 @@ npm run build
   - Entering the South Gate (`z < 156`) in any vehicle triggers the `3, 2, 1, GO!` Grand Prix countdown. Laps run **clockwise** (turn **left / West** upon entering the South Gate).
 - **European Market Town (`z ∈ [212, 424]`)**:
   - Uniform `24`-block grid (`44m × 40m` blocks) featuring merged vertex-shaded European townhouses, market promenade stalls, Central Botanical Fountain Park, South Timber Gazebo, West Clock Obelisk, and multi-lane avenues connected to the stadium via a sloped ramp (`z ∈ [120, 212]`).
+- **Coastal City (`z ∈ [536, 1160]`)**:
+  - Curved second city reached via the North Arterial from Main Avenue: 10 Catmull-Rom roads (arterials, avenues, mid ring, plaza ring, shore connector, beachfront promenade) with junction-aware lane markings, varied building plots (shops, cafés, bakeries, surf rentals, residences with pitched/mansard/terrace roofs), a central palm plaza with tiered fountain, 12 traffic signals cycling NS/EW phases, curbside vending machines, Victorian lamps, palm/pine landscaping, and a **sandy beach** (`z ∈ [1000, 1078]`) with dune slope, pier, umbrellas, towels, boats, lifeguard tower, and a GPU-animated ocean.
+  - **60 NPCs** walk closed spline routes on both cities' sidewalks: personal speeds, errand stops outside shops, jaywalk-free signal waits, walk-cycle limb animation, and per-person night cutoffs (roughly a fifth stay out late) so the streets empty after dark.
 
 ### Source Layout
 
@@ -74,7 +77,8 @@ src/
 ├── input/          # Modifier-safe, paired-key KeyboardInputTracker
 ├── kart/           # Semi-realistic slip/drift/suspension vehicle physics, 5-style mesh rigs & catalog
 ├── player/         # Walk/sprint character physics, safe multi-side vehicle exit & articulated rig
-├── scene/          # Stadium, Market District, Track + FIA kerbs, Checkpoints, Skid/Smoke FX & Canvas
+├── scene/          # Stadium, Market District, Coastal City (curved roads/beach), NPC routines,
+│                   # HDR post-processing (bloom/ACES), Track + FIA kerbs, Checkpoints, Skid/Smoke FX
 └── track/          # Closed Catmull-Rom track spline, arc-length frames & banner placement solver
 ```
 

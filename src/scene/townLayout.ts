@@ -7,6 +7,13 @@ import {
   getBannerPlacements,
 } from '../track/trackLayout';
 import { TOWN_PALETTE } from './townSculptor';
+import {
+  getCoastalGroundY,
+  isPositionInCoastalRegion,
+  isPositionOnCoastalPlot,
+  isPositionOnCoastalPlaza,
+  isPositionOnCoastalRoad,
+} from './coastalCityLayout';
 
 export interface TownRoadRect {
   id: string;
@@ -1218,6 +1225,7 @@ export function isPointInRect(
 }
 
 export function isPositionOnTownRoad(x: number, z: number): boolean {
+  if (isPositionInCoastalRegion(x, z)) return isPositionOnCoastalRoad(x, z);
   for (let i = 0; i < TOWN_ROADS.length; i++) {
     if (isPointInRect(x, z, TOWN_ROADS[i])) return true;
   }
@@ -1248,6 +1256,15 @@ export function isPositionInMarketOrParkPath(x: number, z: number): boolean {
  * ramp corridor) is paved and does NOT slow vehicles — only grass does.
  */
 export function isPositionOnGrass(x: number, z: number): boolean {
+  // Coastal City: lawn, beach sand and water all slow vehicles; roads,
+  // building plots and the plaza island do not.
+  if (isPositionInCoastalRegion(x, z)) {
+    if (isPositionOnCoastalRoad(x, z)) return false;
+    if (isPositionOnCoastalPlot(x, z)) return false;
+    if (isPositionOnCoastalPlaza(x, z)) return false;
+    return true;
+  }
+
   const ax = Math.abs(x);
   const az = Math.abs(z);
 
@@ -1292,6 +1309,8 @@ export function isPositionOnGrass(x: number, z: number): boolean {
  * - Town roads / parking lots (y = -0.71) & uniform block sidewalks (y = -0.64)
  */
 export function getWorldGroundY(x: number, z: number): number {
+  if (isPositionInCoastalRegion(x, z)) return getCoastalGroundY(x, z);
+
   const ax = Math.abs(x);
   const az = Math.abs(z);
 

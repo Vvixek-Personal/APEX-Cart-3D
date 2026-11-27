@@ -11,6 +11,13 @@ import {
   isPositionOnGrass,
   isPositionOnTownRoad,
 } from '../scene/townLayout';
+import { COASTAL_COLLIDERS } from '../scene/coastalCityLayout';
+
+/** Town + Coastal City static obstacles, built once at module load. */
+const ALL_STATIC_COLLIDERS: ReadonlyArray<{ xMin: number; xMax: number; zMin: number; zMax: number }> = [
+  ...TOWN_COLLIDERS,
+  ...COASTAL_COLLIDERS,
+];
 import type { VehiclePhysicsStats } from './vehicleCatalog';
 
 export interface KartInputState {
@@ -61,7 +68,7 @@ export const KART_PHYSICS: VehiclePhysicsStats & {
   worldMinX: -252,
   worldMaxX: 252,
   worldMinZ: -196,
-  worldMaxZ: 534,
+  worldMaxZ: 1150,
 };
 
 /**
@@ -217,8 +224,8 @@ export function resolveStaticCollisions(
   let collided = false;
 
   for (let pass = 0; pass < 2; pass++) {
-    for (let i = 0; i < TOWN_COLLIDERS.length; i++) {
-      const box = TOWN_COLLIDERS[i];
+    for (let i = 0; i < ALL_STATIC_COLLIDERS.length; i++) {
+      const box = ALL_STATIC_COLLIDERS[i];
       const closestX = Math.max(box.xMin, Math.min(rx, box.xMax));
       const closestZ = Math.max(box.zMin, Math.min(rz, box.zMax));
       const dx = rx - closestX;
