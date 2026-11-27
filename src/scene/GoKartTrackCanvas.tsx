@@ -628,6 +628,7 @@ export function GoKartTrackCanvas({
     controls.maxPolarAngle = Math.PI * 0.44;
     controls.minDistance = 80;
     controls.maxDistance = 3000;
+    (controls as any).keys = {};
 
     const initialPose = spectatorCtrl.snapToPose(
       camera,
